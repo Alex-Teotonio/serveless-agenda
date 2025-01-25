@@ -49,12 +49,6 @@ functions:
       - http:
           path: events
           method: post
-  listEvents:
-    handler: handler.listEvents
-    events:
-      - http:
-          path: events
-          method: get
 
   updateEvent:
     handler: handler.updateEvent
