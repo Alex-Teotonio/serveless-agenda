@@ -26,7 +26,6 @@ provider:
     JWT_SECRET: "dev_jwt_secret"
     GOOGLE_CLIENT_ID: "${env:GOOGLE_CLIENT_ID}"
     GOOGLE_CLIENT_SECRET: "${env:GOOGLE_CLIENT_SECRET}"
-
 custom:
   tableName: "users-table-${self:provider.stage}"
 
@@ -50,6 +49,12 @@ functions:
       - http:
           path: events
           method: post
+  listEvents:
+    handler: handler.listEvents
+    events:
+      - http:
+          path: events
+          method: get
 
   updateEvent:
     handler: handler.updateEvent
