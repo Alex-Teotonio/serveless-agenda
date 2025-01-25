@@ -1,11 +1,14 @@
+# "org" ensures this Service is used with the correct Serverless Framework Access Key.
 org: alexs29
+# "app" enables Serverless Framework Dashboard features and sharing them with other Services.
 app: agendazap
+# "service" is the name of this project. This will also be added to your AWS resource names.
 service: agendazap-backend
 
 provider:
   name: aws
   runtime: nodejs20.x
-  stage: ${opt:stage, 'dev'}
+  stage: ${opt:stage, 'dev'} # Define o stage padrão como 'dev' caso não seja especificado
   iam:
     role:
       statements:
@@ -33,42 +36,10 @@ functions:
   api:
     handler: handler.app
     events:
-      - httpApi: "*"
+      - httpApi: "*" # Considerar especificar os endpoints mais detalhadamente
     environment:
       USERS_TABLE: ${self:custom.tableName}
       AGENDAZAP_TABLE: AgendazapTable-${self:provider.stage}
-  googleCalendarAuth:
-    handler: handler.googleCalendarAuth
-    events:
-      - http:
-          path: google/auth
-          method: get
-  createEvent:
-    handler: handler.createEvent
-    events:
-      - http:
-          path: events
-          method: post
-
-  updateEvent:
-    handler: handler.updateEvent
-    events:
-      - http:
-          path: events/{id}
-          method: put
-
-  deleteEvent:
-    handler: handler.deleteEvent
-    events:
-      - http:
-          path: events/{id}
-          method: delete
-  oauth2callback:
-    handler: handler.oauth2callback
-    events:
-      - http:
-          path: oauth2callback
-          method: get
 
 resources:
   Resources:
@@ -78,18 +49,9 @@ resources:
         AttributeDefinitions:
           - AttributeName: userId
             AttributeType: S
-          - AttributeName: email
-            AttributeType: S
         KeySchema:
           - AttributeName: userId
             KeyType: HASH
-        GlobalSecondaryIndexes:
-          - IndexName: EmailIndex
-            KeySchema:
-              - AttributeName: email
-                KeyType: HASH
-            Projection:
-              ProjectionType: ALL
         BillingMode: PAY_PER_REQUEST
         TableName: ${self:custom.tableName}
     AgendazapTable:
