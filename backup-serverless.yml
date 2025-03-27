@@ -26,10 +26,7 @@ provider:
     JWT_SECRET: "dev_jwt_secret"
     GOOGLE_CLIENT_ID: ${env:GOOGLE_CLIENT_ID}
     GOOGLE_CLIENT_SECRET: ${env:GOOGLE_CLIENT_SECRET}
-    ACCOUNT_SID_TWILIO: ${env:ACCOUNT_SID_TWILIO}
-    AUTH_TOKEN_TWILIO: ${env:AUTH_TOKEN_TWILIO}
 
->>>>>>> 9ed2825... Add new changes
 custom:
   tableName: "users-table-${self:provider.stage}"
 
@@ -79,23 +76,6 @@ functions:
       - http:
           path: oauth2callback
           method: get
-  checkEvents:
-    handler: handler.checkEvents
-    events:
-      - schedule:
-          rate: rate(1 day)
-  checkEventsManual:
-    handler: handler.checkEvents
-    events:
-      - http:
-          path: checkEvents
-          method: get
-  demoReply:
-    handler: handler.demoReply
-    events:
-      - http:
-          path: demo-reply
-          method: post
 
 resources:
   Resources:
