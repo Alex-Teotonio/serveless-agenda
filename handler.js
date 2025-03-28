@@ -540,57 +540,59 @@ module.exports.demoReply = async (event) => {
   const querystring = require("querystring");
   // Faz o parse do body recebido (formato x-www-form-urlencoded)
   const bodyParams = querystring.parse(event.body);
-  console.log(bodyParams);
 
+  // Utilize ButtonPayload se existir; caso contrário, use Body.
+  const responseId = (bodyParams.ButtonPayload || bodyParams.Body || "")
+    .toLowerCase()
+    .trim();
+
+  // Número do remetente (cliente) e número da nutricionista
   const from = bodyParams.From;
-  const messageText = (bodyParams.Body || "").toLowerCase().trim();
+  const nutritionistNumber = "+553195316802";
 
-  if (messageText === "confirmar") {
+  // Lógica para os diferentes casos:
+  if (responseId === "confirm") {
+    // Caso: Template de 2 dias antes - Confirmação
     await sendWhatsAppTextMessage(from, "Sua consulta foi confirmada! ✅");
-  } else if (messageText === "cancelar") {
-    // Envia mensagem informando cancelamento e perguntando se deseja reagendar
     await sendWhatsAppTextMessage(
-      "+3197508819",
-      "Seu agendamento foi cancelado. Em breve entraremos em contato com as opções de reagendamento."
+      nutritionistNumber,
+      `O cliente ${from} confirmou a consulta (2 dias antes).`
     );
-    // (Opcional) Notificar a nutricionista sobre o cancelamento
-    // await sendWhatsAppTextMessage(
-    //   "+553197508819",
-    //   "Desculpe, não há horários disponíveis para reagendamento amanhã."
-    // );
-  } else if (messageText === "sim") {
-    // Exemplo: buscamos os horários disponíveis para amanhã
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    const availableSlots = await getAvailableSlotsForDate(tomorrow);
-
-    if (availableSlots.length > 0) {
-      // Cria uma mensagem listando as opções
-      let message = `Horários disponíveis para ${tomorrow.toLocaleDateString()}:\n`;
-      availableSlots.forEach((slot, index) => {
-        message += `${index + 1} - ${slot}\n`;
-      });
-      message += "Por favor, responda com o número da opção desejada.";
-      await sendWhatsAppTextMessage("+553197508819", message);
-    } else {
-      await sendWhatsAppTextMessage(
-        "+553197508819",
-        "Desculpe, não há horários disponíveis para reagendamento amanhã."
-      );
-    }
-  } else if (/^[1-9]\d*$/.test(messageText)) {
-    // Se o paciente enviar um número, isso pode indicar que ele escolheu um slot.
-    // Aqui você pode armazenar a escolha, confirmar o reagendamento e/ou notificar a nutricionista.
-    // Para simplicidade, apenas enviamos uma mensagem de confirmação.
+  } else if (responseId === "cancel") {
+    // Caso: Template de 2 dias antes - Cancelamento
     await sendWhatsAppTextMessage(
-      "+553197508819",
-      `Você selecionou a opção ${messageText}. Nossa equipe entrará em contato para confirmar o novo horário.`
+      from,
+      "Sua consulta foi cancelada. Em breve entraremos em contato com as opções de reagendamento."
     );
-    // (Opcional) Notifique a nutricionista sobre a escolha do paciente.
+    await sendWhatsAppTextMessage(
+      nutritionistNumber,
+      `O cliente ${from} cancelou a consulta (2 dias antes).`
+    );
+  } else if (responseId === "confirm_seven") {
+    // Caso: Template de 7 dias antes - Pré-confirmação
+    await sendWhatsAppTextMessage(
+      from,
+      "Você confirmou seu pré-agendamento. Aguarde nossa confirmação!"
+    );
+    await sendWhatsAppTextMessage(
+      nutritionistNumber,
+      `O cliente ${from} confirmou o pré-agendamento (7 dias antes).`
+    );
+  } else if (responseId === "cancel_seven") {
+    // Caso: Template de 7 dias antes - Pré-cancelamento
+    await sendWhatsAppTextMessage(
+      from,
+      "Você cancelou seu pré-agendamento. Em breve, entraremos em contato para reagendamento."
+    );
+    await sendWhatsAppTextMessage(
+      nutritionistNumber,
+      `O cliente ${from} cancelou o pré-agendamento (7 dias antes).`
+    );
   } else {
+    // Caso padrão: Resposta não reconhecida
     await sendWhatsAppTextMessage(
-      "+553197508819",
-      "Desculpe, não entendi sua mensagem. Por favor, responda com 'confirmar', 'cancelar', 'sim' ou com o número da opção desejada."
+      from,
+      "Desculpe, não entendi sua resposta. Por favor, utilize as opções fornecidas."
     );
   }
 
