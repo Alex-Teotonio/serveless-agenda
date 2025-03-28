@@ -478,6 +478,9 @@ module.exports.checkEvents = async () => {
       const twoDaysBefore = new Date(eventDate);
       twoDaysBefore.setDate(eventDate.getDate() - 2);
 
+      const fifteenDaysAfter = new Date(eventDate);
+      fifteenDaysAfter.setDate(eventDate.getDate() + 15);
+
       const formattedDate = eventDate.toLocaleDateString("pt-BR");
       const formattedTime = eventDate.toLocaleTimeString("pt-BR", {
         hour: "2-digit",
@@ -521,6 +524,16 @@ module.exports.checkEvents = async () => {
           "HX8ed3f6db3846d650fa7e1e09ca24cc48"
         );
       }
+
+      if (now.toDateString() === fifteenDaysAfter.toDateString()) {
+        // Inicia o fluxo do questionário enviando o template inicial
+        // Por exemplo, utilizando um template que contém o botão "Responder Questionário"
+        await sendTemplateMessage(
+          clientInfo.phone,
+          { 1: clientInfo.name || "Cliente" },
+          "HX1bcdffa59bc761ad22e9e60def194080"
+        );
+      }
     }
 
     return {
@@ -538,83 +551,72 @@ module.exports.checkEvents = async () => {
 
 module.exports.demoReply = async (event) => {
   const querystring = require("querystring");
-  // Faz o parse do body recebido (formato x-www-form-urlencoded)
   const bodyParams = querystring.parse(event.body);
+  const from = bodyParams.From; // Número do paciente
+  const nutritionistNumber = "+553195316802";
 
-  // Utilize ButtonPayload se existir; caso contrário, use Body.
+  // Extrai o ButtonPayload se existir, senão utiliza o Body
   const responseId = (bodyParams.ButtonPayload || bodyParams.Body || "")
     .toLowerCase()
     .trim();
 
-  // Número do remetente (cliente) e número da nutricionista
-  const from = bodyParams.From;
-  const nutritionistNumber = "+553195316802";
-
-  // Lógica para os diferentes casos:
-  if (responseId === "confirm") {
-    // Caso: Template de 2 dias antes - Confirmação
-    await sendWhatsAppTextMessage(from, "Sua consulta foi confirmada! ✅");
-    await sendWhatsAppTextMessage(
-      nutritionistNumber,
-      `O cliente ${from} confirmou a consulta (2 dias antes).`
-    );
-  } else if (responseId === "cancel") {
-    // Caso: Template de 2 dias antes - Cancelamento
-    await sendWhatsAppTextMessage(
-      from,
-      "Sua consulta foi cancelada. Em breve entraremos em contato com as opções de reagendamento."
-    );
-    await sendWhatsAppTextMessage(
-      nutritionistNumber,
-      `O cliente ${from} cancelou a consulta (2 dias antes).`
-    );
-  } else if (responseId === "confirm_seven") {
-    // Caso: Template de 7 dias antes - Pré-confirmação
-    await sendWhatsAppTextMessage(
-      from,
-      "Você confirmou seu pré-agendamento. Aguarde nossa confirmação!"
-    );
-    await sendWhatsAppTextMessage(
-      nutritionistNumber,
-      `O cliente ${from} confirmou o pré-agendamento (7 dias antes).`
-    );
-  } else if (responseId === "cancel_seven") {
-    // Caso: Template de 7 dias antes - Pré-cancelamento
-    await sendWhatsAppTextMessage(
-      from,
-      "Você cancelou seu pré-agendamento. Em breve, entraremos em contato para reagendamento."
-    );
-    await sendWhatsAppTextMessage(
-      nutritionistNumber,
-      `O cliente ${from} cancelou o pré-agendamento (7 dias antes).`
-    );
-  } else {
-    // Caso padrão: Resposta não reconhecida
-    await sendWhatsAppTextMessage(
-      from,
-      "Desculpe, não entendi sua resposta. Por favor, utilize as opções fornecidas."
-    );
+  // Se o usuário clicar no botão "Responder Questionário" (id: resp_quest), inicia o fluxo
+  if (responseId === "resp_quest") {
+    await saveSurveyState(from, { currentQuestion: 0, responses: {} });
+    await handleSurveyResponse(from, ""); // Envia a primeira pergunta
+  }
+  // Se for uma resposta para confirmação/cancelamento de consulta
+  else if (
+    responseId === "confirm" ||
+    responseId === "cancel" ||
+    responseId === "confirm_seven" ||
+    responseId === "cancel_seven"
+  ) {
+    if (responseId === "confirm") {
+      await sendWhatsAppTextMessage(from, "Sua consulta foi confirmada! ✅");
+      await sendWhatsAppTextMessage(
+        nutritionistNumber,
+        `O cliente ${from} confirmou a consulta (2 dias antes).`
+      );
+    } else if (responseId === "cancel") {
+      await sendWhatsAppTextMessage(
+        from,
+        "Sua consulta foi cancelada. Em breve entraremos em contato com as opções de reagendamento."
+      );
+      await sendWhatsAppTextMessage(
+        nutritionistNumber,
+        `O cliente ${from} cancelou a consulta (2 dias antes).`
+      );
+    } else if (responseId === "confirm_seven") {
+      await sendWhatsAppTextMessage(
+        from,
+        "Você confirmou seu pré-agendamento. Aguarde nossa confirmação!"
+      );
+      await sendWhatsAppTextMessage(
+        nutritionistNumber,
+        `O cliente ${from} confirmou o pré-agendamento (7 dias antes).`
+      );
+    } else if (responseId === "cancel_seven") {
+      await sendWhatsAppTextMessage(
+        from,
+        "Você cancelou seu pré-agendamento. Em breve, entraremos em contato para reagendamento."
+      );
+      await sendWhatsAppTextMessage(
+        nutritionistNumber,
+        `O cliente ${from} cancelou o pré-agendamento (7 dias antes).`
+      );
+    }
+  }
+  // Caso contrário, trata a resposta como parte do questionário
+  else {
+    await handleSurveyResponse(from, bodyParams.Body || "");
   }
 
   return {
     statusCode: 200,
-    body: JSON.stringify({ message: "Mensagem processada com sucesso." }),
+    body: JSON.stringify({ message: "Mensagem processada." }),
   };
 };
-
-// Fun��o auxiliar que retorna os hor�rios dispon�veis
-function getAvailableSlots() {
-  return (
-    "Horários disponíveis:\n" +
-    "Segunda: 08:00 - 12:00 e 14:00 - 17:00\n" +
-    "Terça: 17:00 - 21:00\n" +
-    "Quarta: 13:00 - 17:00\n" +
-    "Quinta: 07:00 - 12:00 e 17:00 - 20:00\n" +
-    "Sexta: 17:00 - 19:00\n" +
-    "Sábado: 07:00 - 12:00"
-  );
-}
-
 async function listEventsForDate(startOfDay, endOfDay) {
   try {
     const calendar = google.calendar({ version: "v3", auth: oauth2Client });
@@ -716,21 +718,6 @@ async function getAvailableSlotsForDate(date) {
   return availableSlots;
 }
 
-function extractPhoneNumber(description) {
-  const regex = /Contato:\s*(\+?\d+)/i;
-  const match = description && description.match(regex);
-  if (match && match[1]) {
-    // Remove o sinal de '+' se existir
-    let phone = match[1].replace("+", "");
-    // Se o número não começar com "55", adiciona "55" no início
-    if (!phone.startsWith("+55")) {
-      phone = "+55" + phone;
-    }
-    return phone;
-  }
-  return null;
-}
-
 function extractClientInfo(description) {
   // Expressão para extrair o telefone após "Contato:"
   const phoneRegex = /Contato:\s*(\+?\d+)/i;
@@ -758,4 +745,141 @@ function extractClientInfo(description) {
   }
 
   return { phone, name };
+}
+
+// Funções auxiliares para gerenciar o estado do questionário no DynamoDB
+async function getSurveyState(from) {
+  const params = {
+    TableName: "surveyStates", // certifique-se de que essa tabela exista no DynamoDB
+    Key: { phone: from },
+  };
+  const result = await dynamo.get(params).promise();
+  return result.Item || { currentQuestion: 0, responses: {} };
+}
+
+async function saveSurveyState(from, state) {
+  const params = {
+    TableName: "surveyStates",
+    Item: { phone: from, ...state },
+  };
+  await dynamo.put(params).promise();
+}
+
+// Função para enviar a próxima pergunta com base no número da pergunta
+async function sendNextQuestion(from, questionNumber) {
+  switch (questionNumber) {
+    case 1:
+      await sendWhatsAppTextMessage(
+        from,
+        "Pergunta 1:\nDe modo geral, qual nota (0 a 5) você daria para sua disciplina no plano alimentar? (Responda '0 a 3' ou '4 a 5')"
+      );
+      break;
+    case 2:
+      await sendWhatsAppTextMessage(
+        from,
+        "Pergunta 2:\nEm que quesito você está tendo mais dificuldade? Responda:\n1 - Durante a semana\n2 - Fim de semana\n3 - Os dois"
+      );
+      break;
+    case 3:
+      await sendWhatsAppTextMessage(
+        from,
+        "Pergunta 3:\nNo quesito Sensação de fome, qual nota (0 a 5) você daria?"
+      );
+      break;
+    case 4:
+      await sendWhatsAppTextMessage(
+        from,
+        "Pergunta 4:\nCom relação à adesão à dieta, dê uma nota de 0 a 5, onde:\n0 - Não está aderindo\n1 - Quase não está aderindo\n2 - Pouco\n3 - Aos poucos\n4 - Já aderiu, mas pode melhorar\n5 - Aderência entre 90% e 100%"
+      );
+      break;
+    case 5:
+      await sendWhatsAppTextMessage(
+        from,
+        "Pergunta 5:\nComo tem estado sua motivação para seguir o Plano Alimentar? Pontue de 0 a 5."
+      );
+      break;
+    default:
+      await sendWhatsAppTextMessage(
+        from,
+        "Obrigado por responder o questionário! Em breve entraremos em contato."
+      );
+      break;
+  }
+}
+
+// Função que processa a resposta do usuário e avança o fluxo do questionário
+async function handleSurveyResponse(from, message) {
+  let state = await getSurveyState(from);
+
+  // Se o fluxo ainda não foi iniciado, inicie com a primeira pergunta.
+  if (state.currentQuestion === 0) {
+    state.currentQuestion = 1;
+    state.responses = {};
+    await saveSurveyState(from, state);
+    await sendNextQuestion(from, state.currentQuestion);
+    return;
+  }
+
+  // Validação da resposta com base na pergunta atual.
+  let valid = true;
+  let errorMessage = "";
+
+  switch (state.currentQuestion) {
+    case 1:
+      // Espera resposta: "0 a 3" ou "4 a 5"
+      if (
+        message.toLowerCase() !== "0 a 3" &&
+        message.toLowerCase() !== "4 a 5"
+      ) {
+        valid = false;
+        errorMessage =
+          "Resposta inválida para a Pergunta 1. Por favor, responda com '0 a 3' ou '4 a 5'.";
+      }
+      break;
+    case 2:
+      // Espera resposta: "1", "2" ou "3"
+      if (message !== "1" && message !== "2" && message !== "3") {
+        valid = false;
+        errorMessage =
+          "Resposta inválida para a Pergunta 2. Por favor, responda com '1', '2' ou '3'.";
+      }
+      break;
+    case 3:
+    case 4:
+    case 5:
+      // Espera resposta numérica entre 0 e 5.
+      const num = parseInt(message, 10);
+      if (isNaN(num) || num < 0 || num > 5) {
+        valid = false;
+        errorMessage =
+          "Resposta inválida. Por favor, responda com um número entre 0 e 5.";
+      }
+      break;
+    default:
+      break;
+  }
+
+  // Se a resposta for inválida, informe e reenvie a mesma pergunta sem avançar.
+  if (!valid) {
+    await sendWhatsAppTextMessage(from, errorMessage);
+    await sendNextQuestion(from, state.currentQuestion);
+    return;
+  }
+
+  // Se a resposta for válida, registra a resposta da pergunta atual
+  const current = state.currentQuestion;
+  state.responses[`question${current}`] = message;
+  state.currentQuestion = current + 1;
+  await saveSurveyState(from, state);
+
+  // Se ainda há perguntas, envia a próxima; caso contrário, finaliza o fluxo.
+  if (state.currentQuestion <= 5) {
+    await sendNextQuestion(from, state.currentQuestion);
+  } else {
+    await sendWhatsAppTextMessage(
+      from,
+      "Obrigado por responder o questionário! Em breve entraremos em contato."
+    );
+    // Opcional: remova ou processe o estado do usuário aqui
+  }
 }

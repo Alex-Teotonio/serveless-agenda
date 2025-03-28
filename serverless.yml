@@ -20,6 +20,7 @@ provider:
           Resource:
             - Fn::GetAtt: [UsersTable, Arn]
             - Fn::GetAtt: [AgendazapTable, Arn]
+            - Fn::GetAtt: [surveyStates, Arn]
   environment:
     USERS_TABLE: ${self:custom.tableName}
     AGENDAZAP_TABLE: AgendazapTable-${self:provider.stage}
@@ -133,6 +134,17 @@ resources:
           - AttributeName: SK
             KeyType: RANGE
         BillingMode: PAY_PER_REQUEST
+    surveyStates:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        AttributeDefinitions:
+          - AttributeName: phone
+            AttributeType: S
+        KeySchema:
+          - AttributeName: phone
+            KeyType: HASH
+        BillingMode: PAY_PER_REQUEST
+        TableName: surveyStates
 
 plugins:
   - serverless-offline
