@@ -44,12 +44,14 @@ async function sendWhatsAppMessage(to, variables) {
 
 async function sendWhatsAppTextMessage(to, message) {
   console.log("Enviando mensagem simples para:", to);
-
+  if (!to.startsWith("whatsapp:")) {
+    to = `whatsapp:${to}`;
+  }
   try {
     const msg = await client.messages.create({
-      from: "whatsapp:+14155238886",
+      from: "whatsapp:+553193630577",
       body: message,
-      to: `whatsapp:${to}`,
+      to: to,
     });
 
     console.log("Mensagem simples enviada:", msg.sid);
@@ -460,10 +462,9 @@ module.exports.checkEvents = async () => {
       twoDaysBefore.setDate(eventDate.getDate() - 2);
 
       if (now.toDateString() === twoDaysBefore.toDateString()) {
-        const phoneFromDescription = extractPhoneNumber(event.description);
-        console.log("Telefone:", phoneFromDescription);
+        const clientInfo = extractClientInfo(event.description);
 
-        if (phoneFromDescription) {
+        if (clientInfo.phone) {
           const formattedDate = eventDate.toLocaleDateString("pt-BR");
           const formattedTime = eventDate.toLocaleTimeString("pt-BR", {
             hour: "2-digit",
@@ -471,8 +472,8 @@ module.exports.checkEvents = async () => {
             timeZone: event.start.timeZone,
           });
           // Aguarda o envio da mensagem antes de continuar
-          await sendWhatsAppMessage(phoneFromDescription, {
-            1: "Alex",
+          await sendWhatsAppMessage(clientInfo.phone, {
+            1: clientInfo.name || "Cliente",
             2: formattedDate,
             3: formattedTime,
           });
@@ -687,4 +688,33 @@ function extractPhoneNumber(description) {
     return phone;
   }
   return null;
+}
+
+function extractClientInfo(description) {
+  // Expressão para extrair o telefone após "Contato:"
+  const phoneRegex = /Contato:\s*(\+?\d+)/i;
+  // Expressão para extrair o nome após "Paciente:"
+  const nameRegex = /Paciente:\s*([\w\s]+)/i;
+
+  const phoneMatch = description && description.match(phoneRegex);
+  const nameMatch = description && description.match(nameRegex);
+
+  let phone = null;
+  let name = null;
+
+  if (phoneMatch && phoneMatch[1]) {
+    // Remove o sinal de '+' e adiciona o prefixo "55" se não estiver presente
+    phone = phoneMatch[1].replace("+", "");
+    if (!phone.startsWith("55")) {
+      phone = "+55" + phone;
+    } else {
+      phone = "+" + phone;
+    }
+  }
+
+  if (nameMatch && nameMatch[1]) {
+    name = nameMatch[1].trim();
+  }
+
+  return { phone, name };
 }
