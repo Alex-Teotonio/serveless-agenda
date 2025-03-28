@@ -27,6 +27,20 @@ const authToken = process.env.AUTH_TOKEN_TWILIO;
 
 const client = new twilio(accountSid, authToken);
 
+async function sendTemplateMessage(to, variables, templateId) {
+  try {
+    const message = await client.messages.create({
+      from: "whatsapp:+553193630577",
+      contentSid: templateId,
+      contentVariables: JSON.stringify(variables),
+      to: `whatsapp:${to}`,
+    });
+    console.log("Template Message sent:", message.sid);
+  } catch (error) {
+    console.error("Erro ao enviar template message:", error);
+  }
+}
+
 async function sendWhatsAppMessage(to, variables) {
   try {
     const message = await client.messages.create({
@@ -457,34 +471,58 @@ module.exports.checkEvents = async () => {
     for (const event of events) {
       const eventDate = new Date(event.start.dateTime || event.start.date);
 
-      // Calcula dois dias antes do evento
+      // Calcula 7 dias e 2 dias antes do evento
+      const sevenDaysBefore = new Date(eventDate);
+      sevenDaysBefore.setDate(eventDate.getDate() - 7);
+
       const twoDaysBefore = new Date(eventDate);
       twoDaysBefore.setDate(eventDate.getDate() - 2);
 
-      if (now.toDateString() === twoDaysBefore.toDateString()) {
-        const clientInfo = extractClientInfo(event.description);
+      const formattedDate = eventDate.toLocaleDateString("pt-BR");
+      const formattedTime = eventDate.toLocaleTimeString("pt-BR", {
+        hour: "2-digit",
+        minute: "2-digit",
+        timeZone: event.start.timeZone,
+      });
 
-        if (clientInfo.phone) {
-          const formattedDate = eventDate.toLocaleDateString("pt-BR");
-          const formattedTime = eventDate.toLocaleTimeString("pt-BR", {
-            hour: "2-digit",
-            minute: "2-digit",
-            timeZone: event.start.timeZone,
-          });
-          // Aguarda o envio da mensagem antes de continuar
-          await sendWhatsAppMessage(clientInfo.phone, {
+      // Extraindo as informações do cliente
+      const clientInfo = extractClientInfo(event.description);
+      if (!clientInfo.phone) {
+        console.error(
+          "Número de telefone não encontrado na descrição:",
+          event.description
+        );
+        continue;
+      }
+
+      // Verifica se a data atual é 7 dias antes do evento
+      if (now.toDateString() === sevenDaysBefore.toDateString()) {
+        // Envia o template para 7 dias antes (template id HXc0b6a01cb6c702c1ce00a9f241f692d4)
+        await sendTemplateMessage(
+          clientInfo.phone,
+          {
             1: clientInfo.name || "Cliente",
             2: formattedDate,
             3: formattedTime,
-          });
-        } else {
-          console.error(
-            "Número de telefone não encontrado na descrição do evento:",
-            event.description
-          );
-        }
+          },
+          "HXc0b6a01cb6c702c1ce00a9f241f692d4"
+        );
+      }
+      // Se não, verifica se a data atual é 2 dias antes do evento
+      else if (now.toDateString() === twoDaysBefore.toDateString()) {
+        // Envia o template para 2 dias antes (template id HX8ed3f6db3846d650fa7e1e09ca24cc48)
+        await sendTemplateMessage(
+          clientInfo.phone,
+          {
+            1: clientInfo.name || "Cliente",
+            2: formattedDate,
+            3: formattedTime,
+          },
+          "HX8ed3f6db3846d650fa7e1e09ca24cc48"
+        );
       }
     }
+
     return {
       statusCode: 200,
       body: JSON.stringify({ message: "Ok" }),
@@ -502,6 +540,7 @@ module.exports.demoReply = async (event) => {
   const querystring = require("querystring");
   // Faz o parse do body recebido (formato x-www-form-urlencoded)
   const bodyParams = querystring.parse(event.body);
+  console.log(bodyParams);
 
   const from = bodyParams.From;
   const messageText = (bodyParams.Body || "").toLowerCase().trim();
