@@ -934,3 +934,248 @@ async function handleSurveyResponse(from, message) {
     );
   }
 }
+
+// Função para listar eventos que ainda não receberam uma notificação
+// targetOffsetDays: número de dias a partir de hoje.
+// Por exemplo, 2 para confirmação 2 dias antes, 7 para 7 dias antes.
+// Para suporte (após o evento), use um valor negativo, por exemplo, -15.
+async function listEventsForNotification(notificationType, targetOffsetDays) {
+  const now = new Date();
+  let targetDate = new Date(now);
+  targetDate.setDate(now.getDate() + targetOffsetDays);
+
+  const startOfDay = new Date(targetDate);
+  startOfDay.setHours(0, 0, 0, 0);
+  const endOfDay = new Date(targetDate);
+  endOfDay.setHours(23, 59, 59, 999);
+
+  console.log("targetOffsetDays:", targetOffsetDays);
+  console.log("targetDate:", targetDate.toISOString());
+  console.log("startOfDay:", startOfDay.toISOString());
+  console.log("endOfDay:", endOfDay.toISOString());
+
+  const calendar = google.calendar({ version: "v3", auth: oauth2Client });
+  const response = await calendar.events.list({
+    calendarId: "primary",
+    timeMin: startOfDay.toISOString(),
+    timeMax: endOfDay.toISOString(),
+    singleEvents: true,
+    orderBy: "startTime",
+  });
+  console.log("Eventos retornados:", response.data.items);
+
+  // Filtra os eventos que ainda não foram notificados para esse tipo
+  return response.data.items.filter((event) => {
+    const props =
+      event.extendedProperties && event.extendedProperties.private
+        ? event.extendedProperties.private
+        : {};
+    return !props[notificationType];
+  });
+}
+
+// Função para marcar um evento como notificado para um tipo específico
+async function markEventAsNotified(eventId, notificationType) {
+  const calendar = google.calendar({ version: "v3", auth: oauth2Client });
+  // Recupera o evento atual
+  const eventResponse = await calendar.events.get({
+    calendarId: "primary",
+    eventId,
+  });
+  const event = eventResponse.data;
+  const currentProps =
+    (event.extendedProperties && event.extendedProperties.private) || {};
+  currentProps[notificationType] = "true";
+
+  // Usa patch para atualizar somente as extendedProperties sem precisar enviar start/end
+  await calendar.events.patch({
+    calendarId: "primary",
+    eventId,
+    resource: {
+      extendedProperties: {
+        private: currentProps,
+      },
+    },
+  });
+}
+
+// Função para enviar notificações para uma lista de eventos
+// getMessageVariables: callback para extrair as variáveis necessárias do evento
+async function sendNotificationsForEvents(
+  events,
+  notificationType,
+  templateId,
+  getMessageVariables
+) {
+  let messagesSent = 0;
+  for (const event of events) {
+    const clientInfo = extractClientInfo(event.description);
+    if (!clientInfo.phone) {
+      console.error("Telefone não encontrado para o evento:", event.id);
+      continue;
+    }
+    const variables = getMessageVariables(event);
+    await sendTemplateMessage(clientInfo.phone, variables, templateId);
+    await markEventAsNotified(event.id, notificationType);
+    messagesSent++;
+  }
+  return messagesSent;
+}
+
+// Lista os eventos para confirmação 2 dias (que ainda não receberam notificação "notified_2days")
+module.exports.listConfirmation2Days = async () => {
+  try {
+    const events = await listEventsForNotification("notified_2days", 2);
+    return {
+      statusCode: 200,
+      body: JSON.stringify({ events }),
+    };
+  } catch (error) {
+    console.error("Erro ao listar eventos 2 dias:", error);
+    return {
+      statusCode: 500,
+      body: JSON.stringify({ error: "Erro ao listar eventos 2 dias." }),
+    };
+  }
+};
+
+// Envia as mensagens de confirmação para os eventos listados
+module.exports.sendConfirmation2Days = async () => {
+  try {
+    const userId = "51809be2-4de3-43bf-9e68-49c6aee391d3";
+    await ensureValidToken(userId);
+    const events = await listEventsForNotification("notified_2days", 2);
+    const messagesSent = await sendNotificationsForEvents(
+      events,
+      "notified_2days",
+      "HX8ed3f6db3846d650fa7e1e09ca24cc48", // ID do template para confirmação 2 dias
+      (event) => {
+        const eventDate = new Date(event.start.dateTime || event.start.date);
+        return {
+          1: extractClientInfo(event.description).name || "Cliente",
+          2: eventDate.toLocaleDateString("pt-BR"),
+          3: eventDate.toLocaleTimeString("pt-BR", {
+            hour: "2-digit",
+            minute: "2-digit",
+            timeZone: event.start.timeZone,
+          }),
+        };
+      }
+    );
+    return {
+      statusCode: 200,
+      body: JSON.stringify({
+        message: `Processadas ${messagesSent} mensagens de confirmação (2 dias).`,
+      }),
+    };
+  } catch (error) {
+    console.error("Erro ao enviar confirmações 2 dias:", error);
+    return {
+      statusCode: 500,
+      body: JSON.stringify({ error: "Erro ao enviar confirmações 2 dias." }),
+    };
+  }
+};
+
+// Lista os eventos para confirmação 7 dias (que ainda não receberam notificação "notified_7days")
+module.exports.listConfirmation7Days = async () => {
+  try {
+    const events = await listEventsForNotification("notified_7days", 7);
+    return {
+      statusCode: 200,
+      body: JSON.stringify({ events }),
+    };
+  } catch (error) {
+    console.error("Erro ao listar eventos 7 dias:", error);
+    return {
+      statusCode: 500,
+      body: JSON.stringify({ error: "Erro ao listar eventos 7 dias." }),
+    };
+  }
+};
+
+// Envia as mensagens de confirmação para os eventos listados
+module.exports.sendConfirmation7Days = async () => {
+  try {
+    const events = await listEventsForNotification("notified_7days", 7);
+    const messagesSent = await sendNotificationsForEvents(
+      events,
+      "notified_7days",
+      "HXc0b6a01cb6c702c1ce00a9f241f692d4", // ID do template para confirmação 7 dias
+      (event) => {
+        const eventDate = new Date(event.start.dateTime || event.start.date);
+        return {
+          1: extractClientInfo(event.description).name || "Cliente",
+          2: eventDate.toLocaleDateString("pt-BR"),
+          3: eventDate.toLocaleTimeString("pt-BR", {
+            hour: "2-digit",
+            minute: "2-digit",
+            timeZone: event.start.timeZone,
+          }),
+        };
+      }
+    );
+    return {
+      statusCode: 200,
+      body: JSON.stringify({
+        message: `Processadas ${messagesSent} mensagens de confirmação (7 dias).`,
+      }),
+    };
+  } catch (error) {
+    console.error("Erro ao enviar confirmações 7 dias:", error);
+    return {
+      statusCode: 500,
+      body: JSON.stringify({ error: "Erro ao enviar confirmações 7 dias." }),
+    };
+  }
+};
+
+// Lista os eventos para suporte (exemplo: 15 dias após o evento, targetOffsetDays negativo: -15)
+module.exports.listSupportEvents = async () => {
+  try {
+    const events = await listEventsForNotification("notified_support", -15);
+    return {
+      statusCode: 200,
+      body: JSON.stringify({ events }),
+    };
+  } catch (error) {
+    console.error("Erro ao listar eventos de suporte:", error);
+    return {
+      statusCode: 500,
+      body: JSON.stringify({ error: "Erro ao listar eventos de suporte." }),
+    };
+  }
+};
+
+// Envia as mensagens de suporte para os eventos listados
+module.exports.sendSupportNotifications = async () => {
+  try {
+    const events = await listEventsForNotification("notified_support", -15);
+    const messagesSent = await sendNotificationsForEvents(
+      events,
+      "notified_support",
+      "HX1bcdffa59bc761ad22e9e60def194080", // ID do template para suporte
+      (event) => {
+        // Para suporte, talvez seja suficiente enviar apenas o nome do cliente
+        const clientInfo = extractClientInfo(event.description);
+        return {
+          1: clientInfo.name || "Cliente",
+        };
+      }
+    );
+    return {
+      statusCode: 200,
+      body: JSON.stringify({
+        message: `Processadas ${messagesSent} mensagens de suporte.`,
+      }),
+    };
+  } catch (error) {
+    console.error("Erro ao enviar notificações de suporte:", error);
+    return {
+      statusCode: 500,
+      body: JSON.stringify({
+        error: "Erro ao enviar notificações de suporte.",
+      }),
+    };
+  }
+};

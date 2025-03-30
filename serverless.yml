@@ -96,6 +96,24 @@ functions:
       - http:
           path: demo-reply
           method: post
+  sendConfirmation2Days:
+    handler: handler.sendConfirmation2Days
+    events:
+      - http:
+          path: confirmation2days/send
+          method: get
+  sendConfirmation7Days:
+    handler: handler.sendConfirmation7Days
+    events:
+      - http:
+          path: confirmation7days/send
+          method: get
+  sendSupportNotifications:
+    handler: handler.sendSupportNotifications
+    events:
+      - http:
+          path: support/send
+          method: get
 
 resources:
   Resources:
