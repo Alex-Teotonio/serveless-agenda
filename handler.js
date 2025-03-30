@@ -27,6 +27,48 @@ const authToken = process.env.AUTH_TOKEN_TWILIO;
 
 const client = new twilio(accountSid, authToken);
 
+async function ensureValidToken(userId) {
+  console.log("Verificando token para userId:", userId);
+  console.log("USERS_TABLE:", process.env.USERS_TABLE);
+  // Busca os tokens armazenados para o usuário
+  const params = {
+    TableName: process.env.USERS_TABLE,
+    Key: { userId },
+  };
+  const result = await dynamo.get(params).promise();
+  if (!result.Item || !result.Item.googleTokens) {
+    throw new Error("Usuário não autenticado no Google.");
+  }
+  const tokens = result.Item.googleTokens;
+  oauth2Client.setCredentials(tokens);
+
+  try {
+    // getAccessToken() irá renovar o token se estiver expirado.
+    const tokenResponse = await oauth2Client.getAccessToken();
+    // Se houver um novo token (a propriedade expiry_date pode ter sido atualizada), atualize o registro.
+    const newTokens = oauth2Client.credentials;
+    if (
+      newTokens.access_token &&
+      newTokens.expiry_date !== tokens.expiry_date
+    ) {
+      await dynamo
+        .update({
+          TableName: process.env.USERS_TABLE,
+          Key: { userId },
+          UpdateExpression: "SET googleTokens = :tokens",
+          ExpressionAttributeValues: {
+            ":tokens": newTokens,
+          },
+        })
+        .promise();
+      console.log("Token atualizado para o userId:", userId);
+    }
+  } catch (error) {
+    console.error("Erro ao atualizar token:", error);
+    throw error;
+  }
+}
+
 async function sendTemplateMessage(to, variables, templateId) {
   try {
     const message = await client.messages.create({
@@ -327,6 +369,8 @@ module.exports.updateEvent = async (event) => {
 module.exports.listEvents = async (event) => {
   const userId = "51809be2-4de3-43bf-9e68-49c6aee391d3";
 
+  await ensureValidToken(userId);
+
   // Recuperar token do banco de dados
   const params = {
     TableName: process.env.USERS_TABLE,
@@ -433,6 +477,16 @@ const saveTokenToDB = async (userId, tokens) => {
 
 module.exports.checkEvents = async () => {
   const userId = "51809be2-4de3-43bf-9e68-49c6aee391d3";
+
+  try {
+    await ensureValidToken(userId);
+  } catch (error) {
+    console.error("Erro na validação do token:", error);
+    return {
+      statusCode: 500,
+      body: JSON.stringify({ error: "Erro na validação do token do Google." }),
+    };
+  }
 
   // Recuperar token do banco de dados
   const params = {
@@ -826,14 +880,12 @@ async function handleSurveyResponse(from, message) {
 
   switch (state.currentQuestion) {
     case 1:
-      // Espera resposta: "0 a 3" ou "4 a 5"
-      if (
-        message.toLowerCase() !== "0 a 3" &&
-        message.toLowerCase() !== "4 a 5"
-      ) {
+      // Valida se a resposta é numérica e está entre 0 e 5.
+      const num1 = parseInt(message, 10);
+      if (isNaN(num1) || num1 < 0 || num1 > 5) {
         valid = false;
         errorMessage =
-          "Resposta inválida para a Pergunta 1. Por favor, responda com '0 a 3' ou '4 a 5'.";
+          "Resposta inválida para a Pergunta 1. Por favor, responda com um número entre 0 e 5.";
       }
       break;
     case 2:
@@ -847,7 +899,7 @@ async function handleSurveyResponse(from, message) {
     case 3:
     case 4:
     case 5:
-      // Espera resposta numérica entre 0 e 5.
+      // Valida resposta numérica entre 0 e 5.
       const num = parseInt(message, 10);
       if (isNaN(num) || num < 0 || num > 5) {
         valid = false;
@@ -866,7 +918,7 @@ async function handleSurveyResponse(from, message) {
     return;
   }
 
-  // Se a resposta for válida, registra a resposta da pergunta atual
+  // Se a resposta for válida, registra a resposta da pergunta atual.
   const current = state.currentQuestion;
   state.responses[`question${current}`] = message;
   state.currentQuestion = current + 1;
@@ -880,6 +932,5 @@ async function handleSurveyResponse(from, message) {
       from,
       "Obrigado por responder o questionário! Em breve entraremos em contato."
     );
-    // Opcional: remova ou processe o estado do usuário aqui
   }
 }
