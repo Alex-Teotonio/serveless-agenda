@@ -103,6 +103,7 @@ async function sendWhatsAppTextMessage(to, message) {
   if (!to.startsWith("whatsapp:")) {
     to = `whatsapp:${to}`;
   }
+  console.log(to);
   try {
     const msg = await client.messages.create({
       from: "whatsapp:+553193630577",
@@ -484,7 +485,9 @@ module.exports.checkEvents = async () => {
     console.error("Erro na validação do token:", error);
     return {
       statusCode: 500,
-      body: JSON.stringify({ error: "Erro na validação do token do Google." }),
+      body: JSON.stringify({
+        error: "Erro na validação do token do Google.",
+      }),
     };
   }
 
@@ -628,42 +631,52 @@ module.exports.demoReply = async (event) => {
   ) {
     if (responseId === "confirm") {
       await sendWhatsAppTextMessage(from, "Sua consulta foi confirmada! ✅");
-      await sendWhatsAppTextMessage(
+      await sendTemplateMessage(
         nutritionistNumber,
-        `O cliente ${from} confirmou a consulta (2 dias antes).`
+        { 1: from, 2: "confirmou" },
+        "HX63a1d3ac2863fb13dd811dee40ced592"
       );
     } else if (responseId === "cancel") {
       await sendWhatsAppTextMessage(
         from,
         "Sua consulta foi cancelada. Em breve entraremos em contato com as opções de reagendamento."
       );
-      await sendWhatsAppTextMessage(
+      await sendTemplateMessage(
         nutritionistNumber,
-        `O cliente ${from} cancelou a consulta (2 dias antes).`
+        { 1: from, 2: "cancelou" },
+        "HX63a1d3ac2863fb13dd811dee40ced592"
       );
     } else if (responseId === "confirm_seven") {
       await sendWhatsAppTextMessage(
         from,
         "Você confirmou seu pré-agendamento. Aguarde nossa confirmação!"
       );
-      await sendWhatsAppTextMessage(
+      await sendTemplateMessage(
         nutritionistNumber,
-        `O cliente ${from} confirmou o pré-agendamento (7 dias antes).`
+        { 1: from, 2: "confirmou" },
+        "HX395c25bc3600cc005e8f8b80f142da06"
       );
     } else if (responseId === "cancel_seven") {
       await sendWhatsAppTextMessage(
         from,
         "Você cancelou seu pré-agendamento. Em breve, entraremos em contato para reagendamento."
       );
-      await sendWhatsAppTextMessage(
+      await sendTemplateMessage(
         nutritionistNumber,
-        `O cliente ${from} cancelou o pré-agendamento (7 dias antes).`
+        { 1: from, 2: "cancelou" },
+        "HX395c25bc3600cc005e8f8b80f142da06"
       );
     }
   }
   // Caso contrário, trata a resposta como parte do questionário
   else {
-    await handleSurveyResponse(from, bodyParams.Body || "");
+    await sendWhatsAppTextMessage(
+      from,
+      "Este número é exclusivo para notificações de consultas. " +
+        "Por favor, utilize apenas as opções disponíveis (Confirmar ou Cancelar). " +
+        "Qualquer outra solicitação não será reconhecida. Para assuntos diferentes ou reagendamento entre em contato: (31) 995316802."
+    );
+    // await handleSurveyResponse(from, bodyParams.Body || "");
   }
 
   return {
@@ -776,7 +789,7 @@ function extractClientInfo(description) {
   // Expressão para extrair o telefone após "Contato:"
   const phoneRegex = /Contato:\s*(\+?\d+)/i;
   // Expressão para extrair o nome após "Paciente:"
-  const nameRegex = /Paciente:\s*([\w\s]+)/i;
+  const nameRegex = /Paciente:\s*([^\r\n]+)/i;
 
   const phoneMatch = description && description.match(phoneRegex);
   const nameMatch = description && description.match(nameRegex);
@@ -941,14 +954,19 @@ async function handleSurveyResponse(from, message) {
 // Para suporte (após o evento), use um valor negativo, por exemplo, -15.
 async function listEventsForNotification(notificationType, targetOffsetDays) {
   const now = new Date();
-  let targetDate = new Date(now);
-  targetDate.setDate(now.getDate() + targetOffsetDays);
+
+  // por algo assim:
+  const nowSp = new Date(
+    new Date().toLocaleString("en-US", { timeZone: "America/Sao_Paulo" })
+  );
+  // agora worka no fuso do usuário
+  const targetDate = new Date(nowSp);
+  targetDate.setDate(nowSp.getDate() + targetOffsetDays);
 
   const startOfDay = new Date(targetDate);
   startOfDay.setHours(0, 0, 0, 0);
   const endOfDay = new Date(targetDate);
   endOfDay.setHours(23, 59, 59, 999);
-
   console.log("targetOffsetDays:", targetOffsetDays);
   console.log("targetDate:", targetDate.toISOString());
   console.log("startOfDay:", startOfDay.toISOString());
@@ -959,6 +977,7 @@ async function listEventsForNotification(notificationType, targetOffsetDays) {
     calendarId: "primary",
     timeMin: startOfDay.toISOString(),
     timeMax: endOfDay.toISOString(),
+    timeZone: "America/Sao_Paulo",
     singleEvents: true,
     orderBy: "startTime",
   });
@@ -1097,6 +1116,8 @@ module.exports.listConfirmation7Days = async () => {
 // Envia as mensagens de confirmação para os eventos listados
 module.exports.sendConfirmation7Days = async () => {
   try {
+    const userId = "51809be2-4de3-43bf-9e68-49c6aee391d3";
+    await ensureValidToken(userId);
     const events = await listEventsForNotification("notified_7days", 7);
     const messagesSent = await sendNotificationsForEvents(
       events,
