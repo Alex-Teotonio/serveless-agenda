@@ -6,6 +6,9 @@ provider:
   name: aws
   runtime: nodejs20.x
   stage: ${opt:stage, 'dev'}
+  region: us-east-1
+  httpApi:
+    cors: true
   iam:
     role:
       statements:
@@ -19,40 +22,60 @@ provider:
             - dynamodb:DeleteItem
           Resource:
             - Fn::GetAtt: [UsersTable, Arn]
-            - Fn::GetAtt: [AgendazapTable, Arn]
+            - Fn::Join:
+              - ""
+              - - Fn::GetAtt: [ UsersTable, Arn ]
+                - "/index/EmailIndex"
             - Fn::GetAtt: [surveyStates, Arn]
+            - Fn::GetAtt: [PatientsTable, Arn]
+            - Fn::GetAtt: [NutricionistasTable, Arn]
+
   environment:
-    USERS_TABLE: ${self:custom.tableName}
-    AGENDAZAP_TABLE: AgendazapTable-${self:provider.stage}
-    JWT_SECRET: "dev_jwt_secret"
+    USERS_TABLE: users-table-${self:provider.stage}
+    PATIENTS_TABLE: PatientsTable-${self:provider.stage}
+    NUTRICIONISTAS_TABLE: NutricionistasTable-${self:provider.stage}
+    JWT_SECRET: dev_jwt_secret
     GOOGLE_CLIENT_ID: ${env:GOOGLE_CLIENT_ID}
     GOOGLE_CLIENT_SECRET: ${env:GOOGLE_CLIENT_SECRET}
     ACCOUNT_SID_TWILIO: ${env:ACCOUNT_SID_TWILIO}
     AUTH_TOKEN_TWILIO: ${env:AUTH_TOKEN_TWILIO}
-
-custom:
-  tableName: "users-table-${self:provider.stage}"
 
 functions:
   api:
     handler: handler.app
     events:
       - httpApi: "*"
-    environment:
-      USERS_TABLE: ${self:custom.tableName}
-      AGENDAZAP_TABLE: AgendazapTable-${self:provider.stage}
+
+  checkEvents:
+    handler: handler.checkEvents
+    events:
+      - schedule:
+          rate: rate(1 day)
+      - http:
+          path: checkEvents
+          method: get
+
   googleCalendarAuth:
     handler: handler.googleCalendarAuth
     events:
       - http:
           path: google/auth
           method: get
+
+  oauth2callback:
+    handler: handler.oauth2callback
+    events:
+      - http:
+          path: oauth2callback
+          method: get
+
   createEvent:
     handler: handler.createEvent
     events:
       - http:
           path: events
           method: post
+
   listEvents:
     handler: handler.listEvents
     events:
@@ -73,41 +96,21 @@ functions:
       - http:
           path: events/{id}
           method: delete
-  oauth2callback:
-    handler: handler.oauth2callback
-    events:
-      - http:
-          path: oauth2callback
-          method: get
-  checkEvents:
-    handler: handler.checkEvents
-    events:
-      - schedule:
-          rate: rate(1 day)
-  checkEventsManual:
-    handler: handler.checkEvents
-    events:
-      - http:
-          path: checkEvents
-          method: get
-  demoReply:
-    handler: handler.demoReply
-    events:
-      - http:
-          path: demo-reply
-          method: post
+
   sendConfirmation2Days:
     handler: handler.sendConfirmation2Days
     events:
       - http:
           path: confirmation2days/send
           method: get
+
   sendConfirmation7Days:
     handler: handler.sendConfirmation7Days
     events:
       - http:
           path: confirmation7days/send
           method: get
+
   sendSupportNotifications:
     handler: handler.sendSupportNotifications
     events:
@@ -115,11 +118,19 @@ functions:
           path: support/send
           method: get
 
+  demoReply:
+    handler: handler.demoReply
+    events:
+      - http:
+          path: demo-reply
+          method: post
+
 resources:
   Resources:
     UsersTable:
       Type: AWS::DynamoDB::Table
       Properties:
+        TableName: users-table-${self:provider.stage}
         AttributeDefinitions:
           - AttributeName: userId
             AttributeType: S
@@ -136,11 +147,36 @@ resources:
             Projection:
               ProjectionType: ALL
         BillingMode: PAY_PER_REQUEST
-        TableName: ${self:custom.tableName}
-    AgendazapTable:
+
+    PatientsTable:
       Type: AWS::DynamoDB::Table
       Properties:
-        TableName: AgendazapTable-${self:provider.stage}
+        TableName: PatientsTable-${self:provider.stage}
+        AttributeDefinitions:
+          - AttributeName: PK
+            AttributeType: S
+          - AttributeName: SK
+            AttributeType: S
+          - AttributeName: telefone_whatsapp
+            AttributeType: S
+        KeySchema:
+          - AttributeName: PK
+            KeyType: HASH
+          - AttributeName: SK
+            KeyType: RANGE
+        GlobalSecondaryIndexes:
+          - IndexName: ByTelefone
+            KeySchema:
+              - AttributeName: telefone_whatsapp
+                KeyType: HASH
+            Projection:
+              ProjectionType: ALL
+        BillingMode: PAY_PER_REQUEST
+
+    NutricionistasTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: NutricionistasTable-${self:provider.stage}
         AttributeDefinitions:
           - AttributeName: PK
             AttributeType: S
@@ -152,9 +188,11 @@ resources:
           - AttributeName: SK
             KeyType: RANGE
         BillingMode: PAY_PER_REQUEST
+
     surveyStates:
       Type: AWS::DynamoDB::Table
       Properties:
+        TableName: surveyStates
         AttributeDefinitions:
           - AttributeName: phone
             AttributeType: S
@@ -162,7 +200,6 @@ resources:
           - AttributeName: phone
             KeyType: HASH
         BillingMode: PAY_PER_REQUEST
-        TableName: surveyStates
 
 plugins:
   - serverless-offline
