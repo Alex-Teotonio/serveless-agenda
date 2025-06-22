@@ -1,3 +1,4 @@
+//handler.js
 const serverless = require("serverless-http");
 const express = require("express");
 const AWS = require("aws-sdk");
@@ -10,30 +11,12 @@ const cors = require('cors');
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.options('*', cors());
 
+app.use(express.json());
 
 const dynamo = new AWS.DynamoDB.DocumentClient();
 const usersTable = process.env.USERS_TABLE;
-const nutriTable = process.env.NUTRICIONISTAS_TABLE;
-
-/**
- * Middleware de autenticação JWT
- */
-const authenticate = (req, res, next) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader) return res.status(401).json({ message: "Token não fornecido" });
-
-  const token = authHeader.split(" ")[1];
-  try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    req.nutriId = decoded.nutriId;
-    req.user = decoded;
-    next();
-  } catch (err) {
-    return res.status(401).json({ message: "Token inválido" });
-  }
-};
 
 
 const oauth2Client = new google.auth.OAuth2(
@@ -138,145 +121,6 @@ async function sendWhatsAppTextMessage(to, message) {
     console.error("Erro ao enviar mensagem simples:", error);
   }
 }
-
-// Rota para registrar usuÃ¡rio
-app.post(
-  "/register",
-  [
-    body("nome").notEmpty().withMessage("Nome Ã© obrigatÃ³rio."),
-    body("email").isEmail().withMessage("Email invÃ¡lido."),
-    body("senha")
-      .isLength({ min: 6 })
-      .withMessage("Senha deve ter pelo menos 6 caracteres."),
-    body("telefone_whatsapp")
-      .notEmpty()
-      .withMessage("Telefone WhatsApp Ã© obrigatÃ³rio."),
-  ],
-  async (req, res) => {
-    // ValidaÃ§Ã£o dos dados
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
-    }
-
-    const { nome, email, senha, telefone_whatsapp } = req.body;
-
-    const userId = uuidv4();
-    const timestamp = new Date().toISOString();
-
-    // Hash da senha para seguranÃ§a
-    const hashedSenha = await bcrypt.hash(senha, 10);
-
-    const emailParams = {
-      TableName: usersTable,
-      IndexName: "EmailIndex",
-      KeyConditionExpression: "email = :email",
-      ExpressionAttributeValues: {
-        ":email": email,
-      },
-    };
-
-    try {
-      const emailResult = await dynamo.query(emailParams).promise();
-      if (emailResult.Items.length > 0) {
-        return res.status(409).json({ message: "Email jÃ¡ estÃ¡ em uso." });
-      }
-
-      const params = {
-        TableName: usersTable,
-        Item: {
-          userId,
-          PK: `USER#${userId}`,
-          SK: `METADATA#${userId}`,
-          nome,
-          email,
-          senha: hashedSenha,
-          telefone_whatsapp,
-          created_at: timestamp,
-          updated_at: timestamp,
-        },
-      };
-
-      await dynamo.put(params).promise();
-
-      res
-        .status(201)
-        .json({ message: "UsuÃ¡rio registrado com sucesso.", userId });
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ message: "Erro ao registrar usuÃ¡rio." });
-    }
-  }
-);
-
-/**
- * Garante que o nutricionista existe na tabela
- */
-async function ensureNutricionistaExists(nutriId) {
-  const params = {
-    TableName: nutriTable,
-    Key: {
-      PK: `NUTRICIONISTA#${nutriId}`,
-      SK: `METADATA#${nutriId}`
-    }
-  };
-  const result = await dynamo.get(params).promise();
-  if (!result.Item) {
-    await dynamo.put({
-      TableName: nutriTable,
-      Item: {
-        PK: `NUTRICIONISTA#${nutriId}`,
-        SK: `METADATA#${nutriId}`,
-        createdAt: new Date().toISOString()
-      }
-    }).promise();
-    console.log(`Nutricionista ${nutriId} criado na tabela.`);
-  }
-}
-
-// Rota para login de usuÃ¡rio
-app.post("/login", [
-  body("email").isEmail().withMessage("Email inválido."),
-  body("senha").notEmpty().withMessage("Senha é obrigatória.")
-], async (req, res) => {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
-
-  const { email, senha } = req.body;
-  const params = {
-    TableName: usersTable,
-    IndexName: "EmailIndex",
-    KeyConditionExpression: "email = :email",
-    ExpressionAttributeValues: {
-      ":email": email
-    }
-  };
-
-  try {
-    const result = await dynamo.query(params).promise();
-    if (result.Items.length === 0) return res.status(404).json({ message: "Usuário não encontrado." });
-
-    const user = result.Items[0];
-    const isValid = await bcrypt.compare(senha, user.senha);
-    if (!isValid) return res.status(401).json({ message: "Senha inválida." });
-
-    const nutriId = user.userId;
-
-    const token = jwt.sign(
-      { id: user.userId, email: user.email, nutriId },
-      process.env.JWT_SECRET,
-      { expiresIn: "1h" }
-    );
-
-    await ensureNutricionistaExists(nutriId);
-
-    res.status(200).json({ token, nutriId });
-  } catch (err) {
-    console.error("Erro no login:", err);
-    res.status(500).json({ message: "Erro no login." });
-  }
-});
-
 module.exports.app = serverless(app);
 
 module.exports.googleCalendarAuth = async (event) => {
@@ -293,60 +137,51 @@ module.exports.googleCalendarAuth = async (event) => {
   };
 };
 
-module.exports.createEvent = async (event) => {
-  const userId = "51809be2-4de3-43bf-9e68-49c6aee391d3";
+module.exports.createEvent = async (event, context) => {
+  const { patientPK, patientSK, summary, location, start, end } = JSON.parse(event.body);
+  const nutriId = event.requestContext.authorizer.nutriId; // ou req.nutriId, dependendo de como o serverless-http passa
 
-  // Recuperar token do banco de dados
-  const params = {
-    TableName: process.env.USERS_TABLE,
-    Key: { userId },
+  // 1) Busca dados do paciente
+  const patParams = {
+    TableName: process.env.PATIENTS_TABLE,
+    Key: {
+      PK: `NUTRICIONISTA#${nutriId}`,
+      SK: patientSK
+    },
   };
-
-  const result = await dynamo.get(params).promise();
-
-  console.log("Result:", result);
-  if (!result.Item || !result.Item.googleTokens) {
-    return {
-      statusCode: 401,
-      body: JSON.stringify({ error: "UsuÃ¡rio nÃ£o autenticado no Google." }),
-    };
+  const { Item: paciente } = await dynamo.get(patParams).promise();
+  if (!paciente) {
+    return { statusCode: 404, body: JSON.stringify({ error: "Paciente nï¿½o encontrado" }) };
   }
 
-  const tokens = result.Item.googleTokens;
+  // 2) Garante token Google
+  await ensureValidToken(nutriId);
+  const userParams = { TableName: process.env.USERS_TABLE, Key: { userId: nutriId } };
+  const userResult = await dynamo.get(userParams).promise();
+  oauth2Client.setCredentials(userResult.Item.googleTokens);
 
-  // Configurar o cliente OAuth2 com os tokens
-  oauth2Client.setCredentials(tokens);
-
-  // Dados do evento
-  const { summary, location, description, start, end } = JSON.parse(event.body);
-
-  try {
-    const calendar = google.calendar({ version: "v3", auth: oauth2Client });
-    const response = await calendar.events.insert({
-      calendarId: "primary",
-      resource: {
-        summary,
-        location,
-        description,
-        start: { dateTime: start },
-        end: { dateTime: end },
+  // 3) Insere no Google Calendar
+  const calendar = google.calendar({ version: "v3", auth: oauth2Client });
+  const response = await calendar.events.insert({
+    calendarId: "primary",
+    resource: {
+      summary,
+      location,
+      description: `Contato: ${paciente.telefone_whatsapp} Paciente: ${paciente.nome}`,
+      start: { dateTime: start },
+      end: { dateTime: end },
+      extendedProperties: {
+        private: {
+          pacientePK: paciente.PK,
+          pacienteSK: paciente.SK,
+        },
       },
-    });
+    },
+  });
 
-    return {
-      statusCode: 200,
-      body: JSON.stringify(response.data),
-    };
-  } catch (error) {
-    console.error("Erro ao criar evento:", error);
-    return {
-      statusCode: 500,
-      body: JSON.stringify({
-        error: "Erro ao criar evento no Google Calendar.",
-      }),
-    };
-  }
+  return { statusCode: 200, body: JSON.stringify(response.data) };
 };
+
 
 module.exports.updateEvent = async (event) => {
   const userId = "51809be2-4de3-43bf-9e68-49c6aee391d3";
@@ -721,23 +556,6 @@ module.exports.demoReply = async (event) => {
     body: JSON.stringify({ message: "Mensagem processada." }),
   };
 };
-async function listEventsForDate(startOfDay, endOfDay) {
-  try {
-    const calendar = google.calendar({ version: "v3", auth: oauth2Client });
-    const response = await calendar.events.list({
-      calendarId: "primary",
-      maxResults: 2500,
-      singleEvents: true,
-      orderBy: "startTime",
-      timeMin: startOfDay.toISOString(),
-      timeMax: endOfDay.toISOString(),
-    });
-    return response.data.items || [];
-  } catch (error) {
-    console.error("Erro ao buscar eventos para o dia:", error);
-    return [];
-  }
-}
 
 function extractClientInfo(description) {
   // ExpressÃ£o para extrair o telefone apÃ³s "Contato:"
@@ -995,23 +813,6 @@ async function sendNotificationsForEvents(
   return messagesSent;
 }
 
-// Lista os eventos para confirmaÃ§Ã£o 2 dias (que ainda nÃ£o receberam notificaÃ§Ã£o "notified_2days")
-module.exports.listConfirmation2Days = async () => {
-  try {
-    const events = await listEventsForNotification("notified_2days", 1);
-    return {
-      statusCode: 200,
-      body: JSON.stringify({ events }),
-    };
-  } catch (error) {
-    console.error("Erro ao listar eventos 2 dias:", error);
-    return {
-      statusCode: 500,
-      body: JSON.stringify({ error: "Erro ao listar eventos 2 dias." }),
-    };
-  }
-};
-
 // Envia as mensagens de confirmaÃ§Ã£o para os eventos listados
 module.exports.sendConfirmation2Days = async () => {
   try {
@@ -1042,31 +843,13 @@ module.exports.sendConfirmation2Days = async () => {
       }),
     };
   } catch (error) {
-    console.error("Erro ao enviar confirmação 2 dias:", error);
+    console.error("Erro ao enviar confirmaï¿½ï¿½o 2 dias:", error);
     return {
       statusCode: 500,
-      body: JSON.stringify({ error: "Erro ao enviar confirmação 2 dias." }),
+      body: JSON.stringify({ error: "Erro ao enviar confirmaï¿½ï¿½o 2 dias." }),
     };
   }
 };
-
-// Lista os eventos para confirmaÃ§Ã£o 7 dias (que ainda nÃ£o receberam notificaÃ§Ã£o "notified_7days")
-module.exports.listConfirmation7Days = async () => {
-  try {
-    const events = await listEventsForNotification("notified_7days", 7);
-    return {
-      statusCode: 200,
-      body: JSON.stringify({ events }),
-    };
-  } catch (error) {
-    console.error("Erro ao listar eventos 7 dias:", error);
-    return {
-      statusCode: 500,
-      body: JSON.stringify({ error: "Erro ao listar eventos 7 dias." }),
-    };
-  }
-};
-
 // Envia as mensagens de confirmaÃ§Ã£o para os eventos listados
 module.exports.sendConfirmation7Days = async () => {
   try {
@@ -1097,10 +880,10 @@ module.exports.sendConfirmation7Days = async () => {
       }),
     };
   } catch (error) {
-    console.error("Erro ao enviar confirmação 7 dias:", error);
+    console.error("Erro ao enviar confirmaï¿½ï¿½o 7 dias:", error);
     return {
       statusCode: 500,
-      body: JSON.stringify({ error: "Erro ao enviar confirmação 7 dias." }),
+      body: JSON.stringify({ error: "Erro ao enviar confirmaï¿½ï¿½o 7 dias." }),
     };
   }
 };
@@ -1155,132 +938,4 @@ module.exports.sendSupportNotifications = async () => {
   }
 };
 
-// Helper para limpar telefone em SK
-const cleanPhone = (tel) => tel.replace(/\D/g, "");
 
-// CREATE
-app.post("/nutricionistas/:nutriId/pacientes", async (req, res) => {
-  const { nutriId } = req.params;
-  const { telefone_whatsapp, nome } = req.body;
-  const sk = `PACIENTE#${cleanPhone(telefone_whatsapp)}`;
-  try {
-    await dynamo
-      .put({
-        TableName: process.env.PATIENTS_TABLE,
-        Item: {
-          PK: `NUTRICIONISTA#${nutriId}`,
-          SK: sk,
-          telefone_whatsapp,
-          nome,
-          criadoEm: new Date().toISOString(),
-        },
-      })
-      .promise();
-    res.status(201).json({ message: "Paciente cadastrado." });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Erro ao cadastrar paciente." });
-  }
-});
-
-// READ (lista todos)
-app.get("/nutricionistas/:nutriId/pacientes", async (req, res) => {
-  const { nutriId } = req.params;
-  try {
-    const result = await dynamo
-      .query({
-        TableName: process.env.PATIENTS_TABLE,
-        KeyConditionExpression: "PK = :pk",
-        ExpressionAttributeValues: {
-          ":pk": `NUTRICIONISTA#${nutriId}`,
-        },
-      })
-      .promise();
-    res.json(result.Items || []);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Erro ao listar pacientes." });
-  }
-});
-
-// UPDATE
-app.put("/nutricionistas/:nutriId/pacientes/:phone", async (req, res) => {
-  const { nutriId, phone } = req.params;
-  const { nome } = req.body;
-  const sk = `PACIENTE#${cleanPhone(phone)}`;
-  try {
-    await dynamo
-      .update({
-        TableName: process.env.PATIENTS_TABLE,
-        Key: { PK: `NUTRICIONISTA#${nutriId}`, SK: sk },
-        UpdateExpression: "SET nome = :n",
-        ExpressionAttributeValues: { ":n": nome },
-      })
-      .promise();
-    res.json({ message: "Paciente atualizado." });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Erro ao atualizar paciente." });
-  }
-});
-
-// DELETE
-app.delete("/nutricionistas/:nutriId/pacientes/:phone", async (req, res) => {
-  const { nutriId, phone } = req.params;
-  const sk = `PACIENTE#${cleanPhone(phone)}`;
-  try {
-    await dynamo
-      .delete({
-        TableName: process.env.PATIENTS_TABLE,
-        Key: { PK: `NUTRICIONISTA#${nutriId}`, SK: sk },
-      })
-      .promise();
-    res.json({ message: "Paciente removido." });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Erro ao remover paciente." });
-  }
-});
-
-
-app.post("/nutricionistas/:nutriId/configurar-whatsapp", async (req, res) => {
-  const { nutriId } = req.params;
-  const { whatsapp_from } = req.body;
-
-  if (!whatsapp_from) {
-    return res.status(400).json({ error: "Número WhatsApp é obrigatório." });
-  }
-
-  try {
-    await dynamo.put({
-      TableName: process.env.PATIENTS_TABLE,
-      Item: {
-        PK: `NUTRICIONISTA#${nutriId}`,
-        SK: `METADATA#${nutriId}`,
-        whatsapp_from
-      }
-    }).promise();
-    res.json({ message: "Número do WhatsApp configurado com sucesso." });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Erro ao configurar número do WhatsApp." });
-  }
-});
-
-async function getNutriWhatsAppFrom(nutriId) {
-  const params = {
-    TableName: process.env.PATIENTS_TABLE, // Ou crie NUTRICIONISTAS_TABLE se preferir
-    Key: {
-      PK: `NUTRICIONISTA#${nutriId}`,
-      SK: `METADATA#${nutriId}`
-    }
-  };
-
-  const result = await dynamo.get(params).promise();
-
-  if (!result.Item || !result.Item.whatsapp_from) {
-    throw new Error(`Número WhatsApp do nutricionista ${nutriId} não configurado.`);
-  }
-
-  return result.Item.whatsapp_from;
-}

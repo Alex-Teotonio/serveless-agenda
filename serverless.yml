@@ -1,3 +1,4 @@
+# serverless.yml
 org: alexs29
 app: agendazap
 service: agendazap-backend
@@ -8,14 +9,24 @@ provider:
   stage: ${opt:stage, 'dev'}
   region: us-east-1
   httpApi:
-    cors: true
+    cors:
+      allowedOrigins:
+        - "*"
+      allowedHeaders:
+        - Content-Type
+        - Authorization
+      allowedMethods:
+        - OPTIONS
+        - GET
+        - POST
+        - PUT
+        - DELETE
   iam:
     role:
       statements:
         - Effect: Allow
           Action:
             - dynamodb:Query
-            - dynamodb:Scan
             - dynamodb:GetItem
             - dynamodb:PutItem
             - dynamodb:UpdateItem
@@ -24,104 +35,118 @@ provider:
             - Fn::GetAtt: [UsersTable, Arn]
             - Fn::Join:
               - ""
-              - - Fn::GetAtt: [ UsersTable, Arn ]
+              - - Fn::GetAtt: [UsersTable, Arn]
                 - "/index/EmailIndex"
-            - Fn::GetAtt: [surveyStates, Arn]
             - Fn::GetAtt: [PatientsTable, Arn]
-            - Fn::GetAtt: [NutricionistasTable, Arn]
+            - Fn::GetAtt: [surveyStates, Arn]
 
   environment:
     USERS_TABLE: users-table-${self:provider.stage}
     PATIENTS_TABLE: PatientsTable-${self:provider.stage}
-    NUTRICIONISTAS_TABLE: NutricionistasTable-${self:provider.stage}
     JWT_SECRET: dev_jwt_secret
     GOOGLE_CLIENT_ID: ${env:GOOGLE_CLIENT_ID}
     GOOGLE_CLIENT_SECRET: ${env:GOOGLE_CLIENT_SECRET}
     ACCOUNT_SID_TWILIO: ${env:ACCOUNT_SID_TWILIO}
     AUTH_TOKEN_TWILIO: ${env:AUTH_TOKEN_TWILIO}
 
-functions:
-  api:
-    handler: handler.app
-    events:
-      - httpApi: "*"
+package:
+  individually: true
+  excludeDevDependencies: true
+  exclude:
+    - "**/*.test.js"
+    - "tests/**"
+    - ".git/**"
+    - "node_modules/.bin/**"
+    - "node_modules/@types/**"
+    - "node_modules/@aws-sdk/**"
+    - "node_modules/typescript/**"
 
+custom:
+  esbuild:
+    bundle: true
+    minify: true
+    sourcemap: true
+    target: node20
+    platform: node
+    concurrency: 10
+
+functions:
   checkEvents:
     handler: handler.checkEvents
     events:
       - schedule:
           rate: rate(1 day)
-      - http:
+      - httpApi:
           path: checkEvents
           method: get
 
   googleCalendarAuth:
     handler: handler.googleCalendarAuth
     events:
-      - http:
+      - httpApi:
           path: google/auth
           method: get
 
   oauth2callback:
     handler: handler.oauth2callback
     events:
-      - http:
+      - httpApi:
           path: oauth2callback
           method: get
 
   createEvent:
     handler: handler.createEvent
     events:
-      - http:
+      - httpApi:
           path: events
           method: post
 
   listEvents:
     handler: handler.listEvents
     events:
-      - http:
+      - httpApi:
           path: events
           method: get
 
   updateEvent:
     handler: handler.updateEvent
     events:
-      - http:
+      - httpApi:
           path: events/{id}
           method: put
 
   deleteEvent:
     handler: handler.deleteEvent
     events:
-      - http:
+      - httpApi:
           path: events/{id}
           method: delete
 
   sendConfirmation2Days:
     handler: handler.sendConfirmation2Days
     events:
-      - http:
+      - httpApi:
           path: confirmation2days/send
           method: get
 
   sendConfirmation7Days:
     handler: handler.sendConfirmation7Days
     events:
-      - http:
+      - httpApi:
           path: confirmation7days/send
           method: get
 
   sendSupportNotifications:
     handler: handler.sendSupportNotifications
     events:
-      - http:
+      - httpApi:
           path: support/send
           method: get
 
   demoReply:
     handler: handler.demoReply
     events:
-      - http:
+      - httpApi:
           path: demo-reply
           method: post
 
@@ -171,22 +196,6 @@ resources:
                 KeyType: HASH
             Projection:
               ProjectionType: ALL
-        BillingMode: PAY_PER_REQUEST
-
-    NutricionistasTable:
-      Type: AWS::DynamoDB::Table
-      Properties:
-        TableName: NutricionistasTable-${self:provider.stage}
-        AttributeDefinitions:
-          - AttributeName: PK
-            AttributeType: S
-          - AttributeName: SK
-            AttributeType: S
-        KeySchema:
-          - AttributeName: PK
-            KeyType: HASH
-          - AttributeName: SK
-            KeyType: RANGE
         BillingMode: PAY_PER_REQUEST
 
     surveyStates:
