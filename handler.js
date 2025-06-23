@@ -1,23 +1,9 @@
 //handler.js
-const serverless = require("serverless-http");
-const express = require("express");
 const AWS = require("aws-sdk");
-const { v4: uuidv4 } = require("uuid");
-const bcrypt = require("bcrypt");
-const { body, validationResult } = require("express-validator");
-const jwt = require("jsonwebtoken");
 const { google } = require("googleapis");
-const cors = require('cors');
 
-const app = express();
-app.use(cors());
-app.options('*', cors());
-
-app.use(express.json());
 
 const dynamo = new AWS.DynamoDB.DocumentClient();
-const usersTable = process.env.USERS_TABLE;
-
 
 const oauth2Client = new google.auth.OAuth2(
   process.env.GOOGLE_CLIENT_ID,
@@ -182,63 +168,6 @@ module.exports.createEvent = async (event, context) => {
   return { statusCode: 200, body: JSON.stringify(response.data) };
 };
 
-
-module.exports.updateEvent = async (event) => {
-  const userId = "51809be2-4de3-43bf-9e68-49c6aee391d3";
-
-  // Recuperar token do banco de dados
-  const params = {
-    TableName: process.env.USERS_TABLE,
-    Key: { userId },
-  };
-
-  const result = await dynamo.get(params).promise();
-
-  if (!result.Item || !result.Item.googleTokens) {
-    return {
-      statusCode: 401,
-      body: JSON.stringify({ error: "Usuário não autenticado no Google." }),
-    };
-  }
-
-  const tokens = result.Item.googleTokens;
-
-  // Configurar o cliente OAuth2 com os tokens
-  oauth2Client.setCredentials(tokens);
-
-  // Dados do evento
-  const { id } = event.pathParameters;
-  const { summary, location, description, start, end } = JSON.parse(event.body);
-
-  try {
-    const calendar = google.calendar({ version: "v3", auth: oauth2Client });
-    const response = await calendar.events.update({
-      calendarId: "primary",
-      eventId: id,
-      resource: {
-        summary,
-        location,
-        description,
-        start: { dateTime: start },
-        end: { dateTime: end },
-      },
-    });
-
-    return {
-      statusCode: 200,
-      body: JSON.stringify(response.data),
-    };
-  } catch (error) {
-    console.error("Erro ao atualizar evento:", error);
-    return {
-      statusCode: 500,
-      body: JSON.stringify({
-        error: "Erro ao atualizar evento no Google Calendar.",
-      }),
-    };
-  }
-};
-
 module.exports.listEvents = async (event) => {
   const userId = "51809be2-4de3-43bf-9e68-49c6aee391d3";
 
@@ -290,21 +219,6 @@ module.exports.listEvents = async (event) => {
     };
   }
 };
-
-module.exports.deleteEvent = async (event) => {
-  const { id } = event.pathParameters;
-
-  const calendar = google.calendar({ version: "v3", auth: oauth2Client });
-  await calendar.events.delete({
-    calendarId: "primary",
-    eventId: id,
-  });
-
-  return {
-    statusCode: 204,
-  };
-};
-
 module.exports.oauth2callback = async (event) => {
   const querystring = require("querystring");
   console.log("Query Params:", event.queryStringParameters);

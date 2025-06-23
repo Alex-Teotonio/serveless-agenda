@@ -50,7 +50,7 @@ provider:
     AUTH_TOKEN_TWILIO: ${env:AUTH_TOKEN_TWILIO}
 
 package:
-  individually: true
+  individually: false
   excludeDevDependencies: true
   exclude:
     - "**/*.test.js"
@@ -77,77 +77,63 @@ functions:
       - schedule:
           rate: rate(1 day)
       - httpApi:
-          path: checkEvents
+          path: /checkEvents
           method: get
 
   googleCalendarAuth:
     handler: handler.googleCalendarAuth
     events:
       - httpApi:
-          path: google/auth
+          path: /google/auth
           method: get
 
   oauth2callback:
     handler: handler.oauth2callback
     events:
       - httpApi:
-          path: oauth2callback
+          path: /oauth2callback
           method: get
 
   createEvent:
     handler: handler.createEvent
     events:
       - httpApi:
-          path: events
+          path: /events
           method: post
 
   listEvents:
     handler: handler.listEvents
     events:
       - httpApi:
-          path: events
+          path: /events
           method: get
-
-  updateEvent:
-    handler: handler.updateEvent
-    events:
-      - httpApi:
-          path: events/{id}
-          method: put
-
-  deleteEvent:
-    handler: handler.deleteEvent
-    events:
-      - httpApi:
-          path: events/{id}
-          method: delete
 
   sendConfirmation2Days:
     handler: handler.sendConfirmation2Days
     events:
       - httpApi:
-          path: confirmation2days/send
+          path: /confirmation2days/send
           method: get
 
   sendConfirmation7Days:
     handler: handler.sendConfirmation7Days
     events:
       - httpApi:
-          path: confirmation7days/send
+          path: /confirmation7days/send
           method: get
 
   sendSupportNotifications:
     handler: handler.sendSupportNotifications
     events:
       - httpApi:
-          path: support/send
+          path: /support/send
           method: get
 
   demoReply:
     handler: handler.demoReply
     events:
       - httpApi:
-          path: demo-reply
+          path: /demo-reply
           method: post
 
 resources:
