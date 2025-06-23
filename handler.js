@@ -8,7 +8,7 @@ const dynamo = new AWS.DynamoDB.DocumentClient();
 const oauth2Client = new google.auth.OAuth2(
   process.env.GOOGLE_CLIENT_ID,
   process.env.GOOGLE_CLIENT_SECRET,
-  "https://y5ghcb4jv8.execute-api.us-east-1.amazonaws.com/dev/oauth2callback"
+  "https://vprikxgmlf.execute-api.us-east-1.amazonaws.com/oauth2callback"
 );
 
 const twilio = require("twilio");
@@ -59,7 +59,7 @@ async function ensureValidToken(userId) {
   }
 }
 
-async function sendTemplateMessage(to, variables, templateId, fromNumber) {
+async function sendTemplateMessage(to, variables, templateId, fromNumber = "+553193630577") {
   try {
     const message = await client.messages.create({
       from: `whatsapp:${fromNumber}`,
@@ -94,7 +94,6 @@ async function sendWhatsAppTextMessage(to, message) {
   if (!to.startsWith("whatsapp:")) {
     to = `whatsapp:${to}`;
   }
-  console.log(to);
   try {
     const msg = await client.messages.create({
       from: "whatsapp:+553193630577",
@@ -107,7 +106,6 @@ async function sendWhatsAppTextMessage(to, message) {
     console.error("Erro ao enviar mensagem simples:", error);
   }
 }
-module.exports.app = serverless(app);
 
 module.exports.googleCalendarAuth = async (event) => {
   const authUrl = oauth2Client.generateAuthUrl({
@@ -732,7 +730,9 @@ module.exports.sendConfirmation2Days = async () => {
   try {
     const userId = "51809be2-4de3-43bf-9e68-49c6aee391d3";
     await ensureValidToken(userId);
-    const events = await listEventsForNotification("notified_2days", 1);
+    const events = await listEventsForNotification("notified_2days", 2);
+
+    console.log(events);
     const messagesSent = await sendNotificationsForEvents(
       events,
       "notified_2days",
@@ -851,5 +851,50 @@ module.exports.sendSupportNotifications = async () => {
     };
   }
 };
+
+async function getSentMessagesToday() {
+  const now = new Date();
+  const startOfDay = new Date(now);
+  startOfDay.setHours(0, 0, 0, 0);
+
+  const messages = await client.messages.list({
+    dateSentAfter: startOfDay.toISOString(), // Envia no formato ISO
+    limit: 50 // você pode ajustar conforme sua necessidade
+  });
+
+  // Filtra apenas WhatsApp se quiser
+  const whatsappMessages = messages.filter(msg => msg.from.startsWith('whatsapp:'));
+
+  return whatsappMessages;
+}
+
+
+module.exports.listSentMessagesToday = async () => {
+  try {
+    const messages = await getSentMessagesToday();
+
+    // Resumo
+    const summary = {
+      total: messages.length,
+      byStatus: {},
+    };
+
+    messages.forEach(msg => {
+      summary.byStatus[msg.status] = (summary.byStatus[msg.status] || 0) + 1;
+    });
+
+    return {
+      statusCode: 200,
+      body: JSON.stringify(summary),
+    };
+  } catch (err) {
+    console.error("Erro ao buscar mensagens:", err);
+    return {
+      statusCode: 500,
+      body: JSON.stringify({ error: "Erro ao buscar mensagens." }),
+    };
+  }
+};
+
 
 

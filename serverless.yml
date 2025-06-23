@@ -135,6 +135,12 @@ functions:
       - httpApi:
           path: /demo-reply
           method: post
+  listSentMessagesToday:
+    handler: handler.listSentMessagesToday
+    events:
+      - httpApi:
+          path: /messages/sent-today
+          method: get
 
 resources:
   Resources:
