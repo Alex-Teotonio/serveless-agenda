@@ -6,7 +6,9 @@
     "aws-sdk": "^2.1692.0",
     "axios": "^1.10.0",
     "googleapis": "^144.0.0",
-    "twilio": "^5.4.3"
+    "jsonwebtoken": "^9.0.2",
+    "twilio": "^5.4.3",
+    "uuid": "^11.1.0"
   },
   "devDependencies": {
     "serverless-offline": "^14.4.0"

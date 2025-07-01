@@ -141,6 +141,37 @@ functions:
       - httpApi:
           path: /messages/sent-today
           method: get
+  login:
+    handler: src/handlers/auth/login.login  
+    events:
+      - httpApi:
+          path: /auth/login
+          method: post
+  register:
+    handler: src/handlers/auth/register.register
+    events:
+      - httpApi:
+          path: /auth/register
+          method: post
+  createPatient:
+    handler: src/handlers/patients/createPatient.createPatient
+    events:
+      - httpApi:
+          path: /patients
+          method: post
+  getPatients:
+    handler: src/handlers/patients/getPatients.getPatients
+    events:
+      - httpApi:
+          path: /patients
+          method: get
+  createAppointment:
+    handler: src/handlers/appointments/createAppointment.createAppointment
+    events:
+      - httpApi:
+          path: /appointments
+          method: post
+
 
 resources:
   Resources:

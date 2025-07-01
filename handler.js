@@ -873,10 +873,22 @@ module.exports.listSentMessagesToday = async () => {
   try {
     const messages = await getSentMessagesToday();
 
-    // Resumo
+    const detailedMessages = messages.map(msg => ({
+      sid: msg.sid,
+      to: msg.to,
+      from: msg.from,
+      body: msg.body,
+      status: msg.status,
+      dateSent: msg.dateSent,
+      dateCreated: msg.dateCreated,
+      errorCode: msg.errorCode,
+      errorMessage: msg.errorMessage
+    }));
+
     const summary = {
       total: messages.length,
       byStatus: {},
+      details: detailedMessages
     };
 
     messages.forEach(msg => {
