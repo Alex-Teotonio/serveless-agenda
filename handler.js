@@ -1,6 +1,7 @@
 //handler.js
 const AWS = require("aws-sdk");
 const { google } = require("googleapis");
+const { authorize } = require("./src/middleware/authorize"); // ajuste o caminho conforme sua estrutura
 
 
 const dynamo = new AWS.DynamoDB.DocumentClient();
@@ -107,10 +108,14 @@ async function sendWhatsAppTextMessage(to, message) {
   }
 }
 
-module.exports.googleCalendarAuth = async (event) => {
+module.exports.googleCalendarAuth = authorize(async (event) => {
+  const nutriId = event.requestContext.authorizer.nutriId;
+
   const authUrl = oauth2Client.generateAuthUrl({
     access_type: "offline",
+    prompt:       'consent',
     scope: ["https://www.googleapis.com/auth/calendar"],
+    state: nutriId,
   });
 
   return {
@@ -119,7 +124,8 @@ module.exports.googleCalendarAuth = async (event) => {
       Location: authUrl,
     },
   };
-};
+});
+
 
 module.exports.createEvent = async (event, context) => {
   const { patientPK, patientSK, summary, location, start, end } = JSON.parse(event.body);
@@ -218,35 +224,34 @@ module.exports.listEvents = async (event) => {
   }
 };
 module.exports.oauth2callback = async (event) => {
-  const querystring = require("querystring");
-  console.log("Query Params:", event.queryStringParameters);
-  const code = event.queryStringParameters.code;
+  const { code, state: userId } = event.queryStringParameters;
+  const { tokens } = await oauth2Client.getToken(code);
 
-  try {
-    // Obter tokens do Google usando o código de autorização
-    const { tokens } = await oauth2Client.getToken(code);
-    oauth2Client.setCredentials(tokens);
+  // Carrega tokens antigos
+  const { Item } = await dynamo.get({
+    TableName: process.env.USERS_TABLE,
+    Key: { userId }
+  }).promise();
+  // Faz merge, preservando o antigo refresh_token se o novo não trouxer
+  const merged = {
+    ...(Item?.googleTokens || {}),
+    ...tokens
+  };
 
-    const userId = "51809be2-4de3-43bf-9e68-49c6aee391d3";
+  // Salva de volta
+  await dynamo.update({
+    TableName: process.env.USERS_TABLE,
+    Key: { userId },
+    UpdateExpression: 'SET googleTokens = :t',
+    ExpressionAttributeValues: { ':t': merged }
+  }).promise();
 
-    // Salvar tokens no banco de dados
-    await saveTokenToDB(userId, tokens);
-
-    return {
-      statusCode: 200,
-      body: JSON.stringify({
-        message: "Autenticação realizada com sucesso!",
-        tokens,
-      }),
-    };
-  } catch (error) {
-    console.error("Erro ao processar o código de autorização:", error);
-    return {
-      statusCode: 500,
-      body: JSON.stringify({ error: "Erro ao autenticar com o Google." }),
-    };
-  }
+  return {
+    statusCode: 200,
+    body: JSON.stringify({ message: 'Autenticação com sucesso!' })
+  };
 };
+
 
 const saveTokenToDB = async (userId, tokens) => {
   const params = {

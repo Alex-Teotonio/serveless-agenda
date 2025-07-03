@@ -171,8 +171,12 @@ functions:
       - httpApi:
           path: /appointments
           method: post
-
-
+  getAppointments:
+    handler: src/handlers/appointments/getAppointments.getAppointments
+    events:
+      - httpApi:
+          path: /appointments
+          method: get
 resources:
   Resources:
     UsersTable:
