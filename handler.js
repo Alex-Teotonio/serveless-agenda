@@ -1,7 +1,10 @@
 //handler.js
 const AWS = require("aws-sdk");
 const { google } = require("googleapis");
-const { authorize } = require("./src/middleware/authorize"); // ajuste o caminho conforme sua estrutura
+const { authorize } = require("./src/middleware/authorize");
+const jwt = require('jsonwebtoken');
+const { JWT_SECRET } = process.env;
+
 
 
 const dynamo = new AWS.DynamoDB.DocumentClient();
@@ -232,10 +235,13 @@ module.exports.oauth2callback = async (event) => {
     TableName: process.env.USERS_TABLE,
     Key: { userId }
   }).promise();
-  // Faz merge, preservando o antigo refresh_token se o novo não trouxer
+  const oldTokens = Item?.googleTokens || {};
+
+  // Faz merge: usa o novo refresh_token se veio, senão mantém o antigo
   const merged = {
-    ...(Item?.googleTokens || {}),
-    ...tokens
+    ...oldTokens,
+    ...tokens,
+    refresh_token: tokens.refresh_token || oldTokens.refresh_token,
   };
 
   // Salva de volta
@@ -730,10 +736,25 @@ async function sendNotificationsForEvents(
   return messagesSent;
 }
 
-// Envia as mensagens de confirmação para os eventos listados
-module.exports.sendConfirmation2Days = async () => {
+function getNutriIdFromEvent(event) {
+  const auth = event.headers.Authorization || event.headers.authorization;
+  if (!auth?.startsWith('Bearer ')) {
+    throw new Error('Não autenticado: faltando token');
+  }
+  const token = auth.slice(7); // remove 'Bearer '
   try {
-    const userId = "51809be2-4de3-43bf-9e68-49c6aee391d3";
+    const payload = jwt.verify(token, JWT_SECRET);
+    return payload.nutriId;
+  } catch (err) {
+    console.error('Token inválido:', err);
+    throw new Error('Não autenticado: token inválido');
+  }
+}
+
+// Envia as mensagens de confirmação para os eventos listados
+module.exports.sendConfirmation2Days = async (event) => {
+  try {
+    const userId = getNutriIdFromEvent(event);
     await ensureValidToken(userId);
     const events = await listEventsForNotification("notified_2days", 2);
 
@@ -770,9 +791,9 @@ module.exports.sendConfirmation2Days = async () => {
   }
 };
 // Envia as mensagens de confirmação para os eventos listados
-module.exports.sendConfirmation7Days = async () => {
+module.exports.sendConfirmation7Days = async (event) => {
   try {
-    const userId = "51809be2-4de3-43bf-9e68-49c6aee391d3";
+    const userId = getNutriIdFromEvent(event);
     await ensureValidToken(userId);
     const events = await listEventsForNotification("notified_7days", 7);
     const messagesSent = await sendNotificationsForEvents(
