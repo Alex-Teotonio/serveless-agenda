@@ -12,7 +12,7 @@ const createAppointment = async (event) => {
   if (!pacienteId || !start || !end) {
     return {
       statusCode: 400,
-      body: JSON.stringify({ message: "Campos obrigatórios: pacienteId, start, end" }),
+      body: JSON.stringify({ message: "Campos obrigatï¿½rios: pacienteId, start, end" }),
     };
   }
 
@@ -27,7 +27,7 @@ const createAppointment = async (event) => {
   if (!tokens) {
     return {
       statusCode: 403,
-      body: JSON.stringify({ message: "Nutricionista não autenticado no Google" }),
+      body: JSON.stringify({ message: "Nutricionista nï¿½o autenticado no Google" }),
     };
   }
 
@@ -43,8 +43,15 @@ const createAppointment = async (event) => {
         summary,
         description,
         location,
-        start: { dateTime: start },
-        end: { dateTime: end },
+        start: { 
+          dateTime: "2025-07-12T10:00:00", 
+          timeZone: "America/Sao_Paulo" 
+        },
+        end: { 
+          dateTime: "2025-07-12T11:00:00", 
+          timeZone: "America/Sao_Paulo" 
+        }
+        
       },
     });
 
