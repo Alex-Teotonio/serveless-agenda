@@ -12,7 +12,25 @@ const createAppointment = async (event) => {
   if (!pacienteId || !start || !end) {
     return {
       statusCode: 400,
-      body: JSON.stringify({ message: "Campos obrigat�rios: pacienteId, start, end" }),
+      body: JSON.stringify({ message: "Campos obrigatórios: pacienteId, start, end" }),
+    };
+  }
+
+  // Busca nome e telefone do paciente
+  const pacienteParams = {
+    TableName: process.env.PATIENTS_TABLE,
+    Key: {
+      PK: `NUTRICIONISTA#${nutriId}`,
+      SK: pacienteId
+    },
+  };
+  const pacienteResult = await dynamo.get(pacienteParams).promise();
+  const paciente = pacienteResult.Item;
+
+  if (!paciente) {
+    return {
+      statusCode: 404,
+      body: JSON.stringify({ message: "Paciente não encontrado" }),
     };
   }
 
@@ -27,7 +45,7 @@ const createAppointment = async (event) => {
   if (!tokens) {
     return {
       statusCode: 403,
-      body: JSON.stringify({ message: "Nutricionista n�o autenticado no Google" }),
+      body: JSON.stringify({ message: "Nutricionista não autenticado no Google" }),
     };
   }
 
@@ -41,7 +59,7 @@ const createAppointment = async (event) => {
       calendarId: "primary",
       requestBody: {
         summary,
-        description,
+        description: `Contato: ${paciente.telefone_whatsapp}\nPaciente: ${paciente.nome}${description ? `\n\n${description}` : ''}`,
         location,
         start: { 
           dateTime: "2025-07-12T10:00:00", 
