@@ -4,12 +4,12 @@ const { v4: uuidv4 } = require("uuid");
 const dynamo = new AWS.DynamoDB.DocumentClient();
 
 module.exports.register = async (event) => {
-  const { email, password } = JSON.parse(event.body || "{}");
+  const { nome, email, senha, telefone_whatsapp } = JSON.parse(event.body || "{}");
 
-  if (!email || !password) {
+  if (!email || !senha || !nome || !telefone_whatsapp) {
     return {
       statusCode: 400,
-      body: JSON.stringify({ error: "Email e senha s„o obrigatÛrios" }),
+      body: JSON.stringify({ error: "Todos os campos s√£o obrigat√≥rios" }),
     };
   }
 
@@ -17,8 +17,10 @@ module.exports.register = async (event) => {
 
   const item = {
     userId,
+    nome,
     email,
-    password, // ? Em produÁ„o, vocÍ deve hashear com bcrypt
+    telefone_whatsapp,
+    password: senha, // Em produ√ß√£o: usar bcrypt
     criadoEm: new Date().toISOString(),
   };
 
@@ -31,6 +33,6 @@ module.exports.register = async (event) => {
 
   return {
     statusCode: 201,
-    body: JSON.stringify({ message: "Usu·rio criado com sucesso", userId }),
+    body: JSON.stringify({ message: "Usu√°rio criado com sucesso", userId }),
   };
 };

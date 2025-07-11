@@ -22,8 +22,6 @@ const authToken = process.env.AUTH_TOKEN_TWILIO;
 const client = new twilio(accountSid, authToken);
 
 async function ensureValidToken(userId) {
-  console.log("Verificando token para userId:", userId);
-  console.log("USERS_TABLE:", process.env.USERS_TABLE);
   // Busca os tokens armazenados para o usuário
   const params = {
     TableName: process.env.USERS_TABLE,
