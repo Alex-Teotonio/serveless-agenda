@@ -61,14 +61,8 @@ const createAppointment = async (event) => {
         summary,
         description: `Contato: ${paciente.telefone_whatsapp}\nPaciente: ${paciente.nome}${description ? `\n\n${description}` : ''}`,
         location,
-        start: { 
-          dateTime: "2025-07-12T10:00:00", 
-          timeZone: "America/Sao_Paulo" 
-        },
-        end: { 
-          dateTime: "2025-07-12T11:00:00", 
-          timeZone: "America/Sao_Paulo" 
-        }
+        start,
+        end
         
       },
     });
