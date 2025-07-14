@@ -399,11 +399,33 @@ module.exports.checkEvents = async () => {
   }
 };
 
+async function getPatientNameByPhone(phone) {
+  const params = {
+    TableName: process.env.PATIENTS_TABLE,
+    IndexName: 'ByTelefone',
+    KeyConditionExpression: 'telefone_whatsapp = :tel',
+    ExpressionAttributeValues: {
+      ':tel': phone,
+    },
+    Limit: 1,
+  };
+
+  try {
+    const result = await dynamo.query(params).promise();
+    return result.Items?.[0]?.nome || null;
+  } catch (err) {
+    console.error("Erro ao buscar paciente por telefone:", err);
+    return null;
+  }
+}
+
 module.exports.demoReply = async (event) => {
   const querystring = require("querystring");
   const bodyParams = querystring.parse(event.body);
   const from = bodyParams.From; // Número do paciente
   const nutritionistNumber = "+553195316802";
+
+  const nome = await getPatientNameByPhone(from) || from;
 
   // Extrai o ButtonPayload se existir, senão utiliza o Body
   const responseId = (bodyParams.ButtonPayload || bodyParams.Body || "")
@@ -426,7 +448,7 @@ module.exports.demoReply = async (event) => {
       await sendWhatsAppTextMessage(from, "Sua consulta foi confirmada! ✅");
       await sendTemplateMessage(
         nutritionistNumber,
-        { 1: from, 2: "confirmou" },
+        { 1: nome, 2: "confirmou" },
         "HX63a1d3ac2863fb13dd811dee40ced592"
       );
     } else if (responseId === "cancel") {
@@ -436,7 +458,7 @@ module.exports.demoReply = async (event) => {
       );
       await sendTemplateMessage(
         nutritionistNumber,
-        { 1: from, 2: "cancelou" },
+        { 1: nome, 2: "cancelou" },
         "HX63a1d3ac2863fb13dd811dee40ced592"
       );
     } else if (responseId === "confirm_seven") {
