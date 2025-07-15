@@ -75,14 +75,6 @@ custom:
     concurrency: 10
 
 functions:
-  checkEvents:
-    handler: handler.checkEvents
-    events:
-      - schedule:
-          rate: rate(1 day)
-      - httpApi:
-          path: /checkEvents
-          method: get
 
   googleCalendarAuth:
     handler: handler.googleCalendarAuth
@@ -104,13 +96,6 @@ functions:
       - httpApi:
           path: /events
           method: post
-
-  listEvents:
-    handler: handler.listEvents
-    events:
-      - httpApi:
-          path: /events
-          method: get
 
   sendConfirmation2Days:
     handler: handler.sendConfirmation2Days

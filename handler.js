@@ -106,23 +106,26 @@ async function sendTemplateMessageToNutritionist(numberNutritionist, variables, 
   }
 } 
 
-async function sendWhatsAppTextMessage(to, message) {
-  console.log("Enviando mensagem simples para:", to);
-  if (!to.startsWith("whatsapp:")) {
-    to = `whatsapp:${to}`;
-  }
+async function sendWhatsAppTextMessage(to, message, userId) {
   try {
+    const fromNumber = await getFromNumberByUserId(userId);
+
+    if (!to.startsWith("whatsapp:")) {
+      to = `whatsapp:${to}`;
+    }
+
     const msg = await client.messages.create({
-      from: "whatsapp:+553193630577",
+      from: `whatsapp:${fromNumber}`,
       body: message,
       to: to,
     });
 
-    console.log("Mensagem simples enviada:", msg.sid);
+    console.log(`Mensagem simples enviada de ${fromNumber}: ${msg.sid}`);
   } catch (error) {
     console.error("Erro ao enviar mensagem simples:", error);
   }
 }
+
 
 module.exports.googleCalendarAuth = authorize(async (event) => {
   const nutriId = event.requestContext.authorizer.nutriId;
@@ -187,58 +190,6 @@ module.exports.createEvent = async (event, context) => {
 
   return { statusCode: 200, body: JSON.stringify(response.data) };
 };
-
-module.exports.listEvents = async (event) => {
-  const userId = "51809be2-4de3-43bf-9e68-49c6aee391d3";
-
-  await ensureValidToken(userId);
-
-  // Recuperar token do banco de dados
-  const params = {
-    TableName: process.env.USERS_TABLE,
-    Key: { userId },
-  };
-
-  const result = await dynamo.get(params).promise();
-  if (!result.Item || !result.Item.googleTokens) {
-    return {
-      statusCode: 401,
-      body: JSON.stringify({ error: "Usuário não autenticado no Google." }),
-    };
-  }
-
-  const tokens = result.Item.googleTokens;
-
-  // Configurar o cliente OAuth2 com os tokens
-  oauth2Client.setCredentials(tokens);
-
-  try {
-    const calendar = google.calendar({ version: "v3", auth: oauth2Client });
-
-    const now = new Date();
-    const currentYear = now.getFullYear();
-
-    const response = await calendar.events.list({
-      calendarId: "primary",
-      maxResults: 2500,
-      singleEvents: true,
-      orderBy: "startTime",
-      timeMin: new Date(currentYear, 0, 1).toISOString(),
-      timeMax: new Date(currentYear + 1, 0, 1).toISOString(),
-    });
-
-    return {
-      statusCode: 200,
-      body: JSON.stringify(response.data.items),
-    };
-  } catch (error) {
-    console.error("Erro ao listar eventos:", error);
-    return {
-      statusCode: 500,
-      body: JSON.stringify({ error: "Erro ao listar eventos." }),
-    };
-  }
-};
 module.exports.oauth2callback = async (event) => {
   const { code, state: userId } = event.queryStringParameters;
   const { tokens } = await oauth2Client.getToken(code);
@@ -293,20 +244,38 @@ async function getPatientNameByPhone(phone) {
 }
 
 async function findUserIdByFromNumber(from) {
+  console.log("📨 Número recebido (from):", from);
+
+  const cleanFrom = from.replace("whatsapp:", "");
+  console.log("🔍 Número sem prefixo (cleanFrom):", cleanFrom);
+
   const params = {
     TableName: process.env.USERS_TABLE,
     IndexName: "ByTelefoneNutri",
     KeyConditionExpression: "telefone_whatsapp = :telefone",
     ExpressionAttributeValues: {
-      ":telefone": from,
+      ":telefone": cleanFrom,
     },
   };
 
-  const result = await dynamo.query(params).promise();
-  if (result.Items.length > 0) {
-    return result.Items[0].userId;
+  console.log("📤 Parâmetros da query:", JSON.stringify(params, null, 2));
+
+  try {
+    const result = await dynamo.query(params).promise();
+
+    console.log("📥 Resultado da query:", JSON.stringify(result, null, 2));
+
+    if (result.Items.length > 0) {
+      console.log("✅ userId encontrado:", result.Items[0].userId);
+      return result.Items[0].userId;
+    } else {
+      console.warn("⚠️ Nenhum item encontrado para telefone:", cleanFrom);
+      return null;
+    }
+  } catch (error) {
+    console.error("❌ Erro ao buscar userId por telefone:", error);
+    throw error;
   }
-  return null;
 }
 
 module.exports.demoReply = async (event) => {
@@ -325,7 +294,10 @@ const bodyParams = querystring.parse(bodyRaw);
 
   try {
     // Busca o userId baseado no número que enviou a mensagem Segue resultado d(nutricionista)
+    console.log("Número da nutricionista (to):", to);
+
     const userId = await findUserIdByFromNumber(to);
+    console.log("Buscando fromNumber com userId:", userId);
     const fromNumber = to.replace("whatsapp:", ""); // Ex: +553193630577
 
     const nome = await getPatientNameByPhone(from) || from;
@@ -345,7 +317,7 @@ const bodyParams = querystring.parse(bodyRaw);
     ) {
       if (responseId === "confirm") {
         console.log(`Paciente ${nome} confirmou a consulta: ${from}`);
-        await sendWhatsAppTextMessage(from, "Sua consulta foi confirmada! ✅");
+        await sendWhatsAppTextMessage(from, "Sua consulta foi confirmada! ✅",userId);
         await sendTemplateMessageToNutritionist(
           fromNumber,
           { 1: nome, 2: "confirmou" },
@@ -355,7 +327,8 @@ const bodyParams = querystring.parse(bodyRaw);
       } else if (responseId === "cancel") {
         await sendWhatsAppTextMessage(
           from,
-          "Sua consulta foi cancelada. Em breve entraremos em contato com as opções de reagendamento."
+          "Sua consulta foi cancelada. Em breve entraremos em contato com as opções de reagendamento.",
+          userId
         );
         await sendTemplateMessageToNutritionist(
           fromNumber,
@@ -366,7 +339,8 @@ const bodyParams = querystring.parse(bodyRaw);
       } else if (responseId === "confirm_seven") {
         await sendWhatsAppTextMessage(
           from,
-          "Você confirmou seu pré-agendamento. Aguarde nossa confirmação!"
+          "Você confirmou seu pré-agendamento. Aguarde nossa confirmação!",
+          userId
         );
         await sendTemplateMessageToNutritionist(
           fromNumber,
@@ -377,7 +351,8 @@ const bodyParams = querystring.parse(bodyRaw);
       } else if (responseId === "cancel_seven") {
         await sendWhatsAppTextMessage(
           from,
-          "Você cancelou seu pré-agendamento. Em breve, entraremos em contato para reagendamento."
+          "Você cancelou seu pré-agendamento. Em breve, entraremos em contato para reagendamento.",
+          userId
         );
         await sendTemplateMessageToNutritionist(
           fromNumber,
@@ -391,14 +366,18 @@ const bodyParams = querystring.parse(bodyRaw);
         from,
         "Este número é exclusivo para notificações de consultas. " +
           "Por favor, utilize apenas as opções disponíveis (Confirmar ou Cancelar). " +
-          "Qualquer outra solicitação não será reconhecida. Para assuntos diferentes ou reagendamento entre em contato: (31) 99531-6802."
+          "Qualquer outra solicitação não será reconhecida. Para assuntos diferentes ou reagendamento entre em contato: (31) 99531-6802.",
+          userId
       );
     }
 
     return {
       statusCode: 200,
-      body: JSON.stringify({ message: "Mensagem processada." }),
+      headers: { 'Content-Type': 'text/xml' },
+      body: '<Response></Response>',
     };
+    
+    
   } catch (error) {
     console.error("Erro na demoReply:", error);
     return {
