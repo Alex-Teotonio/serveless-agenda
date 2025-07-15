@@ -37,6 +37,10 @@ provider:
               - ""
               - - Fn::GetAtt: [UsersTable, Arn]
                 - "/index/EmailIndex"
+            - Fn::Join:
+              - ""
+              - - Fn::GetAtt: [UsersTable, Arn]
+                - "/index/ByTelefoneNutri"
             - Fn::GetAtt: [PatientsTable, Arn]
             - Fn::GetAtt: [surveyStates, Arn]
 
@@ -122,13 +126,6 @@ functions:
           path: /confirmation7days/send
           method: get
 
-  sendSupportNotifications:
-    handler: handler.sendSupportNotifications
-    events:
-      - httpApi:
-          path: /support/send
-          method: get
-
   demoReply:
     handler: handler.demoReply
     events:
@@ -188,6 +185,8 @@ resources:
             AttributeType: S
           - AttributeName: email
             AttributeType: S
+          - AttributeName: telefone_whatsapp
+            AttributeType: S
         KeySchema:
           - AttributeName: userId
             KeyType: HASH
@@ -195,6 +194,12 @@ resources:
           - IndexName: EmailIndex
             KeySchema:
               - AttributeName: email
+                KeyType: HASH
+            Projection:
+              ProjectionType: ALL
+          - IndexName: ByTelefoneNutri
+            KeySchema:
+              - AttributeName: telefone_whatsapp
                 KeyType: HASH
             Projection:
               ProjectionType: ALL

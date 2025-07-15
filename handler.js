@@ -61,8 +61,25 @@ async function ensureValidToken(userId) {
   }
 }
 
-async function sendTemplateMessage(to, variables, templateId, fromNumber = "+553193630577") {
+async function getFromNumberByUserId(userId) {
+  const res = await dynamo
+    .get({
+      TableName: process.env.USERS_TABLE,
+      Key: { userId },
+    })
+    .promise();
+
+  if (!res.Item || !res.Item.telefone_whatsapp) {
+    throw new Error("Número de WhatsApp do nutricionista não encontrado");
+  }
+
+  return res.Item.telefone_whatsapp;
+}
+
+
+async function sendTemplateMessage(to, variables, templateId, userId) {
   try {
+    const fromNumber = await getFromNumberByUserId(userId);
     const message = await client.messages.create({
       from: `whatsapp:${fromNumber}`,
       contentSid: templateId,
@@ -75,21 +92,19 @@ async function sendTemplateMessage(to, variables, templateId, fromNumber = "+553
   }
 }
 
-
-async function sendWhatsAppMessage(to, variables) {
+async function sendTemplateMessageToNutritionist(numberNutritionist, variables, templateId,numberPatient) {
   try {
     const message = await client.messages.create({
-      from: "whatsapp:+553193630577",
-      contentSid: "HX8ed3f6db3846d650fa7e1e09ca24cc48",
+      from: `whatsapp:+${numberPatient}`,
+      contentSid: templateId,
       contentVariables: JSON.stringify(variables),
-      to: `whatsapp:${to}`,
+      to: `whatsapp:${numberNutritionist}`,
     });
-
-    console.log("Message sent:", message.sid);
+    console.log(`? Mensagem enviada de +553195316802: ${message.sid}`);
   } catch (error) {
-    console.error("Erro ao enviar mensagem:", error);
+    console.error(`? Erro ao enviar mensagem de +553195316802:`, error);
   }
-}
+} 
 
 async function sendWhatsAppTextMessage(to, message) {
   console.log("Enviando mensagem simples para:", to);
@@ -257,148 +272,6 @@ module.exports.oauth2callback = async (event) => {
 };
 
 
-const saveTokenToDB = async (userId, tokens) => {
-  const params = {
-    TableName: process.env.USERS_TABLE,
-    Key: { userId },
-    UpdateExpression: "SET googleTokens = :tokens",
-    ExpressionAttributeValues: {
-      ":tokens": tokens,
-    },
-  };
-  await dynamo.update(params).promise();
-};
-
-module.exports.checkEvents = async () => {
-  const userId = "51809be2-4de3-43bf-9e68-49c6aee391d3";
-
-  try {
-    await ensureValidToken(userId);
-  } catch (error) {
-    console.error("Erro na validação do token:", error);
-    return {
-      statusCode: 500,
-      body: JSON.stringify({
-        error: "Erro na validação do token do Google.",
-      }),
-    };
-  }
-
-  // Recuperar token do banco de dados
-  const params = {
-    TableName: process.env.USERS_TABLE,
-    Key: { userId },
-  };
-
-  const result = await dynamo.get(params).promise();
-  if (!result.Item || !result.Item.googleTokens) {
-    console.error("Usuário não autenticado no Google.");
-    return;
-  }
-
-  const tokens = result.Item.googleTokens;
-
-  // Configurar o cliente OAuth2 com os tokens
-  oauth2Client.setCredentials(tokens);
-
-  try {
-    const calendar = google.calendar({ version: "v3", auth: oauth2Client });
-
-    const now = new Date();
-    const currentYear = now.getFullYear();
-
-    const response = await calendar.events.list({
-      calendarId: "primary",
-      maxResults: 2500,
-      singleEvents: true,
-      orderBy: "startTime",
-      timeMin: new Date(currentYear, 0, 1).toISOString(),
-      timeMax: new Date(currentYear + 1, 0, 1).toISOString(),
-    });
-    const events = response.data.items;
-
-    // Uso do loop for...of para aguardar cada envio
-    for (const event of events) {
-      const eventDate = new Date(event.start.dateTime || event.start.date);
-
-      // Calcula 7 dias e 2 dias antes do evento
-      const sevenDaysBefore = new Date(eventDate);
-      sevenDaysBefore.setDate(eventDate.getDate() - 7);
-
-      const twoDaysBefore = new Date(eventDate);
-      twoDaysBefore.setDate(eventDate.getDate() - 2);
-
-      const fifteenDaysAfter = new Date(eventDate);
-      fifteenDaysAfter.setDate(eventDate.getDate() + 15);
-
-      const formattedDate = eventDate.toLocaleDateString("pt-BR");
-      const formattedTime = eventDate.toLocaleTimeString("pt-BR", {
-        hour: "2-digit",
-        minute: "2-digit",
-        timeZone: event.start.timeZone,
-      });
-
-      // Extraindo as informações do cliente
-      const clientInfo = extractClientInfo(event.description);
-      if (!clientInfo.phone) {
-        console.error(
-          "Número de telefone não encontrado na descrição:",
-          event.description
-        );
-        continue;
-      }
-
-      // Verifica se a data atual é 7 dias antes do evento
-      if (now.toDateString() === sevenDaysBefore.toDateString()) {
-        // Envia o template para 7 dias antes (template id HXc0b6a01cb6c702c1ce00a9f241f692d4)
-        await sendTemplateMessage(
-          clientInfo.phone,
-          {
-            1: clientInfo.name || "Cliente",
-            2: formattedDate,
-            3: formattedTime,
-          },
-          "HXc0b6a01cb6c702c1ce00a9f241f692d4"
-        );
-      }
-      // Se não, verifica se a data atual é 2 dias antes do evento
-      else if (now.toDateString() === twoDaysBefore.toDateString()) {
-        // Envia o template para 2 dias antes (template id HX8ed3f6db3846d650fa7e1e09ca24cc48)
-        await sendTemplateMessage(
-          clientInfo.phone,
-          {
-            1: clientInfo.name || "Cliente",
-            2: formattedDate,
-            3: formattedTime,
-          },
-          "HX8ed3f6db3846d650fa7e1e09ca24cc48"
-        );
-      }
-
-      if (now.toDateString() === fifteenDaysAfter.toDateString()) {
-        // Inicia o fluxo do questionário enviando o template inicial
-        // Por exemplo, utilizando um template que contém o botão "Responder Questionário"
-        await sendTemplateMessage(
-          clientInfo.phone,
-          { 1: clientInfo.name || "Cliente" },
-          "HX1bcdffa59bc761ad22e9e60def194080"
-        );
-      }
-    }
-
-    return {
-      statusCode: 200,
-      body: JSON.stringify({ message: "Ok" }),
-    };
-  } catch (error) {
-    console.error("Erro ao verificar eventos:", error);
-    return {
-      statusCode: 500,
-      body: JSON.stringify({ error: "Erro ao verificar eventos." }),
-    };
-  }
-};
-
 async function getPatientNameByPhone(phone) {
   const params = {
     TableName: process.env.PATIENTS_TABLE,
@@ -419,86 +292,122 @@ async function getPatientNameByPhone(phone) {
   }
 }
 
-module.exports.demoReply = async (event) => {
-  const querystring = require("querystring");
-  const bodyParams = querystring.parse(event.body);
-  const from = bodyParams.From; // Número do paciente
-  const nutritionistNumber = "+553195316802";
+async function findUserIdByFromNumber(from) {
+  const params = {
+    TableName: process.env.USERS_TABLE,
+    IndexName: "ByTelefoneNutri",
+    KeyConditionExpression: "telefone_whatsapp = :telefone",
+    ExpressionAttributeValues: {
+      ":telefone": from,
+    },
+  };
 
-  const nome = await getPatientNameByPhone(from) || from;
-
-  // Extrai o ButtonPayload se existir, senão utiliza o Body
-  const responseId = (bodyParams.ButtonPayload || bodyParams.Body || "")
-    .toLowerCase()
-    .trim();
-
-  // Se o usuário clicar no botão "Responder Questionário" (id: resp_quest), inicia o fluxo
-  if (responseId === "resp_quest") {
-    await saveSurveyState(from, { currentQuestion: 0, responses: {} });
-    await handleSurveyResponse(from, ""); // Envia a primeira pergunta
+  const result = await dynamo.query(params).promise();
+  if (result.Items.length > 0) {
+    return result.Items[0].userId;
   }
-  // Se for uma resposta para confirmação/cancelamento de consulta
-  else if (
-    responseId === "confirm" ||
-    responseId === "cancel" ||
-    responseId === "confirm_seven" ||
-    responseId === "cancel_seven"
-  ) {
-    if (responseId === "confirm") {
-      await sendWhatsAppTextMessage(from, "Sua consulta foi confirmada! ✅");
-      await sendTemplateMessage(
-        nutritionistNumber,
-        { 1: nome, 2: "confirmou" },
-        "HX63a1d3ac2863fb13dd811dee40ced592"
-      );
-    } else if (responseId === "cancel") {
+  return null;
+}
+
+module.exports.demoReply = async (event) => {
+  console.log("Evento recebido:", event);
+  const querystring = require("querystring");
+  let bodyRaw = event.body;
+if (event.isBase64Encoded) {
+  const buff = Buffer.from(event.body, "base64");
+  bodyRaw = buff.toString("utf-8");
+}
+
+const bodyParams = querystring.parse(bodyRaw);
+  const from = bodyParams.From; // Número do paciente (ex: whatsapp:+55...)
+  console.log("Parâmetros do body:", bodyParams);
+  const to = bodyParams.To;     // Número da nutricionista (ex: whatsapp:+55...)
+
+  try {
+    // Busca o userId baseado no número que enviou a mensagem Segue resultado d(nutricionista)
+    const userId = await findUserIdByFromNumber(to);
+    const fromNumber = to.replace("whatsapp:", ""); // Ex: +553193630577
+
+    const nome = await getPatientNameByPhone(from) || from;
+
+    // Extrai o ButtonPayload se existir, senão utiliza o Body
+    const responseId = (bodyParams.ButtonPayload || bodyParams.Body || "")
+      .toLowerCase()
+      .trim();
+
+    console.log(`Resposta recebida do paciente ${nome} (${from}):`, responseId);
+
+    if (
+      responseId === "confirm" ||
+      responseId === "cancel" ||
+      responseId === "confirm_seven" ||
+      responseId === "cancel_seven"
+    ) {
+      if (responseId === "confirm") {
+        console.log(`Paciente ${nome} confirmou a consulta: ${from}`);
+        await sendWhatsAppTextMessage(from, "Sua consulta foi confirmada! ✅");
+        await sendTemplateMessageToNutritionist(
+          fromNumber,
+          { 1: nome, 2: "confirmou" },
+          "HX63a1d3ac2863fb13dd811dee40ced592",
+          from
+        );
+      } else if (responseId === "cancel") {
+        await sendWhatsAppTextMessage(
+          from,
+          "Sua consulta foi cancelada. Em breve entraremos em contato com as opções de reagendamento."
+        );
+        await sendTemplateMessageToNutritionist(
+          fromNumber,
+          { 1: nome, 2: "cancelou" },
+          "HX63a1d3ac2863fb13dd811dee40ced592",
+          from
+        );
+      } else if (responseId === "confirm_seven") {
+        await sendWhatsAppTextMessage(
+          from,
+          "Você confirmou seu pré-agendamento. Aguarde nossa confirmação!"
+        );
+        await sendTemplateMessageToNutritionist(
+          fromNumber,
+          { 1: nome, 2: "confirmou" },
+          "HX395c25bc3600cc005e8f8b80f142da06",
+          from
+        );
+      } else if (responseId === "cancel_seven") {
+        await sendWhatsAppTextMessage(
+          from,
+          "Você cancelou seu pré-agendamento. Em breve, entraremos em contato para reagendamento."
+        );
+        await sendTemplateMessageToNutritionist(
+          fromNumber,
+          { 1: nome, 2: "cancelou" },
+          "HX395c25bc3600cc005e8f8b80f142da06",
+          from
+        );
+      }
+    } else {
       await sendWhatsAppTextMessage(
         from,
-        "Sua consulta foi cancelada. Em breve entraremos em contato com as opções de reagendamento."
-      );
-      await sendTemplateMessage(
-        nutritionistNumber,
-        { 1: nome, 2: "cancelou" },
-        "HX63a1d3ac2863fb13dd811dee40ced592"
-      );
-    } else if (responseId === "confirm_seven") {
-      await sendWhatsAppTextMessage(
-        from,
-        "Você confirmou seu pré-agendamento. Aguarde nossa confirmação!"
-      );
-      await sendTemplateMessage(
-        nutritionistNumber,
-        { 1: from, 2: "confirmou" },
-        "HX395c25bc3600cc005e8f8b80f142da06"
-      );
-    } else if (responseId === "cancel_seven") {
-      await sendWhatsAppTextMessage(
-        from,
-        "Você cancelou seu pré-agendamento. Em breve, entraremos em contato para reagendamento."
-      );
-      await sendTemplateMessage(
-        nutritionistNumber,
-        { 1: from, 2: "cancelou" },
-        "HX395c25bc3600cc005e8f8b80f142da06"
+        "Este número é exclusivo para notificações de consultas. " +
+          "Por favor, utilize apenas as opções disponíveis (Confirmar ou Cancelar). " +
+          "Qualquer outra solicitação não será reconhecida. Para assuntos diferentes ou reagendamento entre em contato: (31) 99531-6802."
       );
     }
-  }
-  // Caso contrário, trata a resposta como parte do questionário
-  else {
-    await sendWhatsAppTextMessage(
-      from,
-      "Este número é exclusivo para notificações de consultas. " +
-        "Por favor, utilize apenas as opções disponíveis (Confirmar ou Cancelar). " +
-        "Qualquer outra solicitação não será reconhecida. Para assuntos diferentes ou reagendamento entre em contato: (31) 995316802."
-    );
-    // await handleSurveyResponse(from, bodyParams.Body || "");
-  }
 
-  return {
-    statusCode: 200,
-    body: JSON.stringify({ message: "Mensagem processada." }),
-  };
+    return {
+      statusCode: 200,
+      body: JSON.stringify({ message: "Mensagem processada." }),
+    };
+  } catch (error) {
+    console.error("Erro na demoReply:", error);
+    return {
+      statusCode: 500,
+      body: JSON.stringify({ error: "Erro ao processar mensagem recebida." }),
+    };
+  }
 };
+
 
 function extractClientInfo(description) {
   // Expressão para extrair o telefone após "Contato:"
@@ -538,131 +447,6 @@ async function getSurveyState(from) {
   const result = await dynamo.get(params).promise();
   return result.Item || { currentQuestion: 0, responses: {} };
 }
-
-async function saveSurveyState(from, state) {
-  const params = {
-    TableName: "surveyStates",
-    Item: { phone: from, ...state },
-  };
-  await dynamo.put(params).promise();
-}
-
-// Função para enviar a próxima pergunta com base no número da pergunta
-async function sendNextQuestion(from, questionNumber) {
-  switch (questionNumber) {
-    case 1:
-      await sendWhatsAppTextMessage(
-        from,
-        "Pergunta 1:\nDe modo geral, qual nota (0 a 5) você daria para sua disciplina no plano alimentar? (Responda '0 a 3' ou '4 a 5')"
-      );
-      break;
-    case 2:
-      await sendWhatsAppTextMessage(
-        from,
-        "Pergunta 2:\nEm que quesito você está tendo mais dificuldade? Responda:\n1 - Durante a semana\n2 - Fim de semana\n3 - Os dois"
-      );
-      break;
-    case 3:
-      await sendWhatsAppTextMessage(
-        from,
-        "Pergunta 3:\nNo quesito Sensação de fome, qual nota (0 a 5) você daria?"
-      );
-      break;
-    case 4:
-      await sendWhatsAppTextMessage(
-        from,
-        "Pergunta 4:\nCom relação à adesão à dieta, dê uma nota de 0 a 5, onde:\n0 - Não está aderindo\n1 - Quase não está aderindo\n2 - Pouco\n3 - Aos poucos\n4 - Já aderiu, mas pode melhorar\n5 - Aderência entre 90% e 100%"
-      );
-      break;
-    case 5:
-      await sendWhatsAppTextMessage(
-        from,
-        "Pergunta 5:\nComo tem estado sua motivação para seguir o Plano Alimentar? Pontue de 0 a 5."
-      );
-      break;
-    default:
-      await sendWhatsAppTextMessage(
-        from,
-        "Obrigado por responder o questionário! Em breve entraremos em contato."
-      );
-      break;
-  }
-}
-
-// Função que processa a resposta do usuário e avança o fluxo do questionário
-async function handleSurveyResponse(from, message) {
-  let state = await getSurveyState(from);
-
-  // Se o fluxo ainda não foi iniciado, inicie com a primeira pergunta.
-  if (state.currentQuestion === 0) {
-    state.currentQuestion = 1;
-    state.responses = {};
-    await saveSurveyState(from, state);
-    await sendNextQuestion(from, state.currentQuestion);
-    return;
-  }
-
-  // Validação da resposta com base na pergunta atual.
-  let valid = true;
-  let errorMessage = "";
-
-  switch (state.currentQuestion) {
-    case 1:
-      // Valida se a resposta é numérica e está entre 0 e 5.
-      const num1 = parseInt(message, 10);
-      if (isNaN(num1) || num1 < 0 || num1 > 5) {
-        valid = false;
-        errorMessage =
-          "Resposta inválida para a Pergunta 1. Por favor, responda com um número entre 0 e 5.";
-      }
-      break;
-    case 2:
-      // Espera resposta: "1", "2" ou "3"
-      if (message !== "1" && message !== "2" && message !== "3") {
-        valid = false;
-        errorMessage =
-          "Resposta inválida para a Pergunta 2. Por favor, responda com '1', '2' ou '3'.";
-      }
-      break;
-    case 3:
-    case 4:
-    case 5:
-      // Valida resposta numérica entre 0 e 5.
-      const num = parseInt(message, 10);
-      if (isNaN(num) || num < 0 || num > 5) {
-        valid = false;
-        errorMessage =
-          "Resposta inválida. Por favor, responda com um número entre 0 e 5.";
-      }
-      break;
-    default:
-      break;
-  }
-
-  // Se a resposta for inválida, informe e reenvie a mesma pergunta sem avançar.
-  if (!valid) {
-    await sendWhatsAppTextMessage(from, errorMessage);
-    await sendNextQuestion(from, state.currentQuestion);
-    return;
-  }
-
-  // Se a resposta for válida, registra a resposta da pergunta atual.
-  const current = state.currentQuestion;
-  state.responses[`question${current}`] = message;
-  state.currentQuestion = current + 1;
-  await saveSurveyState(from, state);
-
-  // Se ainda há perguntas, envia a próxima; caso contrário, finaliza o fluxo.
-  if (state.currentQuestion <= 5) {
-    await sendNextQuestion(from, state.currentQuestion);
-  } else {
-    await sendWhatsAppTextMessage(
-      from,
-      "Obrigado por responder o questionário! Em breve entraremos em contato."
-    );
-  }
-}
-
 // Função para listar eventos que ainda não receberam uma notificação
 // targetOffsetDays: número de dias a partir de hoje.
 // Por exemplo, 2 para confirmação 2 dias antes, 7 para 7 dias antes.
@@ -682,10 +466,6 @@ async function listEventsForNotification(notificationType, targetOffsetDays) {
   startOfDay.setHours(0, 0, 0, 0);
   const endOfDay = new Date(targetDate);
   endOfDay.setHours(23, 59, 59, 999);
-  console.log("targetOffsetDays:", targetOffsetDays);
-  console.log("targetDate:", targetDate.toISOString());
-  console.log("startOfDay:", startOfDay.toISOString());
-  console.log("endOfDay:", endOfDay.toISOString());
 
   const calendar = google.calendar({ version: "v3", auth: oauth2Client });
   const response = await calendar.events.list({
@@ -739,7 +519,8 @@ async function sendNotificationsForEvents(
   events,
   notificationType,
   templateId,
-  getMessageVariables
+  getMessageVariables,
+  userId
 ) {
   let messagesSent = 0;
   for (const event of events) {
@@ -749,7 +530,7 @@ async function sendNotificationsForEvents(
       continue;
     }
     const variables = getMessageVariables(event);
-    await sendTemplateMessage(clientInfo.phone, variables, templateId);
+    await sendTemplateMessage(clientInfo.phone, variables, templateId,userId);
     await markEventAsNotified(event.id, notificationType);
     messagesSent++;
   }
@@ -778,7 +559,6 @@ module.exports.sendConfirmation2Days = async (event) => {
     await ensureValidToken(userId);
     const events = await listEventsForNotification("notified_2days", 2);
 
-    console.log(events);
     const messagesSent = await sendNotificationsForEvents(
       events,
       "notified_2days",
@@ -794,7 +574,8 @@ module.exports.sendConfirmation2Days = async (event) => {
             timeZone: event.start.timeZone,
           }),
         };
-      }
+      },
+      userId
     );
     return {
       statusCode: 200,
@@ -831,7 +612,8 @@ module.exports.sendConfirmation7Days = async (event) => {
             timeZone: event.start.timeZone,
           }),
         };
-      }
+      },
+      userId
     );
     return {
       statusCode: 200,
@@ -861,39 +643,6 @@ module.exports.listSupportEvents = async () => {
     return {
       statusCode: 500,
       body: JSON.stringify({ error: "Erro ao listar eventos de suporte." }),
-    };
-  }
-};
-
-// Envia as mensagens de suporte para os eventos listados
-module.exports.sendSupportNotifications = async () => {
-  try {
-    const events = await listEventsForNotification("notified_support", -15);
-    const messagesSent = await sendNotificationsForEvents(
-      events,
-      "notified_support",
-      "HX1bcdffa59bc761ad22e9e60def194080", // ID do template para suporte
-      (event) => {
-        // Para suporte, talvez seja suficiente enviar apenas o nome do cliente
-        const clientInfo = extractClientInfo(event.description);
-        return {
-          1: clientInfo.name || "Cliente",
-        };
-      }
-    );
-    return {
-      statusCode: 200,
-      body: JSON.stringify({
-        message: `Processadas ${messagesSent} mensagens de suporte.`,
-      }),
-    };
-  } catch (error) {
-    console.error("Erro ao enviar notificações de suporte:", error);
-    return {
-      statusCode: 500,
-      body: JSON.stringify({
-        error: "Erro ao enviar notificações de suporte.",
-      }),
     };
   }
 };
